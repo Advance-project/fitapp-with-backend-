@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+resources/*.lnk
+
+Fit--app/node_modules/
+Fit--app/.expo/
