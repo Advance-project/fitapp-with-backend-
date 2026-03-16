@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { setAccount } from "./userStore";
-import { authApi, saveToken } from "../services/api";
+import { authApi, saveTokens } from "../services/api";
 
 export default function Signup() {
   const navigation = useNavigation<any>();
@@ -30,15 +30,15 @@ export default function Signup() {
       setError("");
       setLoading(true);
       const res = await authApi.signup(email.trim(), username.trim(), password);
-      await saveToken(res.access_token);
+      await saveTokens(res.access_token, res.refresh_token);
       setAccount({
         username: res.user.username,
         createdAt: Date.now(),
         metrics: {},
       });
       navigation.replace("Onboarding");
-    } catch (err: any) {
-      setError(err.message ?? "Signup failed. Please try again.");
+    } catch {
+      setError("Please enter valid input.");
     } finally {
       setLoading(false);
     }
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
   flex: 1,
   justifyContent: "center",
   alignItems: "center",
-  paddingTop: 220,
+  paddingTop: 160,
 },
 
   title: {

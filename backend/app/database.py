@@ -41,6 +41,11 @@ async def get_user_by_id(user_id: str) -> Optional[dict]:
     return _clean(doc) if doc else None
 
 
+async def get_user_by_username(username: str) -> Optional[dict]:
+    doc = await _users().find_one({"username": username})
+    return _clean(doc) if doc else None
+
+
 async def create_user(email: str, username: str, password_hash: str) -> dict:
     user = {
         "id": str(uuid.uuid4()),
@@ -67,7 +72,25 @@ async def delete_user(user_id: str) -> bool:
     return result.deleted_count > 0
 
 
+async def seed_admin(email: str, username: str, password_hash: str) -> None:
+    """Create the admin user if it doesn't already exist."""
+    if await get_user_by_username(username):
+        return
+    user = {
+        "id": str(uuid.uuid4()),
+        "email": email.lower(),
+        "username": username,
+        "password_hash": password_hash,
+        "role": "admin",
+    }
+    try:
+        await _users().insert_one(user)
+    except Exception:
+        pass  # already inserted by a concurrent startup (race guard)
+
+
 async def ensure_indexes() -> None:
     """Call once on startup to create unique indexes."""
     await _users().create_index("email", unique=True)
     await _users().create_index("id", unique=True)
+    await _users().create_index("username", unique=True)

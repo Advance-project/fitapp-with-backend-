@@ -5,14 +5,19 @@ from ..auth_utils import (
     hash_password,
     verify_password,
     create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
     get_current_user,
 )
 from ..models import (
     SignupRequest,
     LoginRequest,
+    AdminLoginRequest,
+    RefreshTokenRequest,
     UpdateUserRequest,
     UserResponse,
     TokenResponse,
+    RefreshResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -46,8 +51,13 @@ async def signup(payload: SignupRequest):
         username=payload.username,
         password_hash=hash_password(payload.password),
     )
-    token = create_access_token({"sub": user["id"]})
-    return TokenResponse(access_token=token, user=_to_user_response(user))
+    access_token = create_access_token({"sub": user["id"]})
+    refresh_token = create_refresh_token({"sub": user["id"]})
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=_to_user_response(user),
+    )
 
 
 # ── POST /auth/login ──────────────────────────────────────────────────────────
@@ -64,8 +74,76 @@ async def login(payload: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
-    token = create_access_token({"sub": user["id"]})
-    return TokenResponse(access_token=token, user=_to_user_response(user))
+    access_token = create_access_token({"sub": user["id"]})
+    refresh_token = create_refresh_token({"sub": user["id"]})
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=_to_user_response(user),
+    )
+
+
+# ── POST /auth/admin-login ────────────────────────────────────────────────────
+
+@router.post(
+    "/admin-login",
+    response_model=TokenResponse,
+    summary="Admin login — username + password, role must be admin",
+)
+async def admin_login(payload: AdminLoginRequest):
+    user = await database.get_user_by_username(payload.username)
+    if user is None or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin credentials",
+        )
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: not an admin account",
+        )
+    access_token = create_access_token({"sub": user["id"]})
+    refresh_token = create_refresh_token({"sub": user["id"]})
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=_to_user_response(user),
+    )
+
+
+# ── POST /auth/refresh ────────────────────────────────────────────────────────
+
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    summary="Exchange a valid refresh token for a new token pair",
+)
+async def refresh_tokens(payload: RefreshTokenRequest):
+    decoded = decode_refresh_token(payload.refresh_token)
+    if decoded is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user_id: str | None = decoded.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token payload",
+        )
+
+    user = await database.get_user_by_id(user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found for refresh token",
+        )
+
+    return RefreshResponse(
+        access_token=create_access_token({"sub": user["id"]}),
+        refresh_token=create_refresh_token({"sub": user["id"]}),
+    )
 
 
 # ── GET /auth/me ──────────────────────────────────────────────────────────────

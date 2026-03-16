@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { deleteAccount } from "./userStore";
+import { authApi, clearToken } from "../services/api";
 import { BarChart } from "react-native-chart-kit";
 
 const MUSCLE_GROUPS = [
@@ -96,8 +97,14 @@ export default function Profile() {
     setEditOpen(false);
   };
 
-  const handleDeleteAccount = () => {
-    const performDelete = () => {
+  const handleDeleteAccount = async () => {
+    const performDelete = async () => {
+      try {
+        await authApi.deleteMe();
+      } catch (_) {
+        // proceed even if the server call fails (e.g. token already expired)
+      }
+      await clearToken();
       deleteAccount();
       navigation.reset({
         index: 0,
@@ -110,7 +117,7 @@ export default function Profile() {
         "Are you sure you want to delete your account? This action cannot be undone."
       );
       if (!confirmed) return;
-      performDelete();
+      await performDelete();
       return;
     }
 

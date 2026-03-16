@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { setAdminAuthenticated, setAccount } from "./userStore";
-import { authApi, saveToken } from "../services/api";
+import { authApi, saveTokens } from "../services/api";
 
 export default function Login() {
   const navigation = useNavigation<any>();
@@ -29,7 +29,7 @@ export default function Login() {
       setError("");
       setLoading(true);
       const res = await authApi.login(email.trim(), password);
-      await saveToken(res.access_token);
+      await saveTokens(res.access_token, res.refresh_token);
       setAccount({
         username: res.user.username,
         createdAt: Date.now(),
@@ -37,8 +37,8 @@ export default function Login() {
       });
       setAdminAuthenticated(false);
       navigation.replace("WorkoutHome");
-    } catch (err: any) {
-      setError(err.message ?? "Login failed. Please try again.");
+    } catch {
+      setError("Invalid email or password.");
     } finally {
       setLoading(false);
     }
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingTop: 260,
+    paddingTop: 210,
   },
 
   title: {

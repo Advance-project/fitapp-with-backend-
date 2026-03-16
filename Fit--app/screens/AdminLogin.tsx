@@ -7,32 +7,38 @@ import {
   StyleSheet,
   ImageBackground,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { setAdminAuthenticated } from "./userStore";
-
-const ADMIN_ID = "a";
-const ADMIN_PASSWORD = "a";
+import { authApi, saveTokens } from "../services/api";
 
 export default function AdminLogin() {
   const navigation = useNavigation<any>();
   const [adminId, setAdminId] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleAdminLogin = () => {
-    const normalizedAdminId = adminId.trim().toLowerCase();
-    const normalizedPassword = password.trim();
-    const isValid =
-      normalizedAdminId === ADMIN_ID &&
-      normalizedPassword === ADMIN_PASSWORD;
+  const handleAdminLogin = async () => {
+    const username = adminId.trim();
+    const pwd = password.trim();
 
-    if (!isValid) {
-      Alert.alert("Access denied", "Invalid admin ID or password.");
+    if (!username || !pwd) {
+      Alert.alert("Validation", "Please enter both Admin ID and password.");
       return;
     }
 
-    setAdminAuthenticated(true);
-    navigation.replace("Admin");
+    setLoading(true);
+    try {
+      const res = await authApi.adminLogin(username, pwd);
+      await saveTokens(res.access_token, res.refresh_token);
+      setAdminAuthenticated(true);
+      navigation.replace("Admin");
+    } catch (err: any) {
+      Alert.alert("Access denied", err.message || "Invalid admin credentials.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -73,8 +79,10 @@ export default function AdminLogin() {
           autoCorrect={false}
         />
 
-        <TouchableOpacity style={styles.button} onPress={handleAdminLogin}>
-          <Text style={styles.buttonText}>Login</Text>
+        <TouchableOpacity style={styles.button} onPress={handleAdminLogin} disabled={loading}>
+          {loading
+            ? <ActivityIndicator color="#000" />
+            : <Text style={styles.buttonText}>Login</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity
