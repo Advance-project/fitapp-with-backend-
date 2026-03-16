@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ImageBackground,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -18,24 +17,26 @@ export default function AdminLogin() {
   const [adminId, setAdminId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleAdminLogin = async () => {
     const username = adminId.trim();
     const pwd = password.trim();
 
     if (!username || !pwd) {
-      Alert.alert("Validation", "Please enter both Admin ID and password.");
+      setError("Please enter both Admin ID and password.");
       return;
     }
 
     setLoading(true);
     try {
+      setError("");
       const res = await authApi.adminLogin(username, pwd);
       await saveTokens(res.access_token, res.refresh_token);
       setAdminAuthenticated(true);
       navigation.replace("Admin");
-    } catch (err: any) {
-      Alert.alert("Access denied", err.message || "Invalid admin credentials.");
+    } catch {
+      setError("Invalid admin ID or password.");
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,10 @@ export default function AdminLogin() {
           style={styles.input}
           placeholderTextColor="#777"
           value={adminId}
-          onChangeText={setAdminId}
+          onChangeText={(value) => {
+            setAdminId(value);
+            if (error) setError("");
+          }}
           autoCapitalize="none"
           autoComplete="off"
           textContentType="none"
@@ -71,13 +75,18 @@ export default function AdminLogin() {
           secureTextEntry
           placeholderTextColor="#777"
           value={password}
-          onChangeText={setPassword}
+          onChangeText={(value) => {
+            setPassword(value);
+            if (error) setError("");
+          }}
           autoCapitalize="none"
           autoComplete="off"
           textContentType="none"
           importantForAutofill="no"
           autoCorrect={false}
         />
+
+        {error !== "" && <Text style={styles.error}>{error}</Text>}
 
         <TouchableOpacity style={styles.button} onPress={handleAdminLogin} disabled={loading}>
           {loading
@@ -158,5 +167,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#0b63ce",
     textDecorationLine: "underline",
+  },
+
+  error: {
+    color: "#ff4d4f",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 10,
   },
 });

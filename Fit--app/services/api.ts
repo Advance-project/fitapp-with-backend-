@@ -1,15 +1,110 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
+import Constants from "expo-constants";
 
 /**
  * Base URL of the FastAPI backend.
  *
- * Physical device on the same WiFi as your PC → use your PC's LAN IP (found in Expo output).
- * Android emulator only → use http://10.0.2.2:8000
- *
- * Your PC's detected LAN IP: 192.168.68.103
- * Change this if your IP changes.
+ * Priority:
+ * 1) EXPO_PUBLIC_API_URL env var
+ * 2) Web: localhost
+ * 3) Android emulator: 10.0.2.2 (special loopback to host machine)
+ * 4) Physical device: LAN IP derived from Metro bundler host
  */
-export const BASE_URL = "http://192.168.68.103:8000";
+const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
+const DEFAULT_WEB_BASE_URL = "http://127.0.0.1:8000";
+const ANDROID_EMULATOR_BASE_URL = "http://10.0.2.2:8000";
+const REQUEST_TIMEOUT_MS = 6000;
+let preferredAndroidBaseUrl: string | null = null;
+
+function getNativeBaseUrl(): string {
+  // When backend is started with `python run.py` (host="0.0.0.0"), the LAN IP
+  // is reachable from BOTH emulator and physical device — no need to distinguish.
+  const debuggerHost: string | undefined =
+    (Constants.expoGoConfig as any)?.debuggerHost ??
+    (Constants.manifest as any)?.debuggerHost;
+
+  if (debuggerHost) {
+    const host = debuggerHost.split(":")[0];
+    return `http://${host}:8000`;
+  }
+
+  // debuggerHost not available: fall back to emulator-safe address
+  return ANDROID_EMULATOR_BASE_URL;
+}
+
+export const BASE_URL =
+  ENV_BASE_URL && ENV_BASE_URL.length > 0
+    ? ENV_BASE_URL
+    : Platform.OS === "web"
+    ? DEFAULT_WEB_BASE_URL
+    : getNativeBaseUrl();
+
+function getAndroidFallbackBaseUrls(): string[] {
+  const urls: string[] = [];
+  if (preferredAndroidBaseUrl) {
+    urls.push(preferredAndroidBaseUrl);
+  }
+  urls.push(BASE_URL);
+  const debuggerHost: string | undefined =
+    (Constants.expoGoConfig as any)?.debuggerHost ??
+    (Constants.manifest as any)?.debuggerHost;
+
+  if (debuggerHost) {
+    const host = debuggerHost.split(":")[0];
+    urls.push(`http://${host}:8000`);
+  }
+
+  urls.push(ANDROID_EMULATOR_BASE_URL);
+
+  // Keep order and remove duplicates.
+  return urls.filter((url, idx) => urls.indexOf(url) === idx);
+}
+
+// Debug: log resolved API URL on app startup
+console.log("[API] Resolved BASE_URL:", BASE_URL);
+console.log("[API] Platform:", Platform.OS);
+
+async function fetchWithAndroidFallback(
+  path: string,
+  options: RequestInit,
+): Promise<Response> {
+  const fetchWithTimeout = async (url: string) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const baseUrls =
+    Platform.OS === "android" && !ENV_BASE_URL
+      ? getAndroidFallbackBaseUrls()
+      : [BASE_URL];
+
+  let lastError: unknown;
+
+  for (let i = 0; i < baseUrls.length; i += 1) {
+    const candidateUrl = `${baseUrls[i]}${path}`;
+    try {
+      if (i > 0) {
+        console.log("[API] Retrying with:", candidateUrl);
+      }
+      const response = await fetchWithTimeout(candidateUrl);
+      if (Platform.OS === "android") {
+        preferredAndroidBaseUrl = baseUrls[i];
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      console.warn("[API] Fetch failed:", candidateUrl, error);
+    }
+  }
+
+  throw lastError ?? new Error("Network request failed");
+}
 
 export const TOKEN_KEY = "auth_token";
 export const REFRESH_TOKEN_KEY = "refresh_token";
@@ -75,13 +170,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  let res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const requestUrl = `${BASE_URL}${path}`;
+  const startTime = Date.now();
+  console.log("[API]", options.method || "GET", requestUrl);
+
+  let res = await fetchWithAndroidFallback(path, { ...options, headers });
+
+  const elapsed = Date.now() - startTime;
+  console.log("[API]", res.status, requestUrl, `(${elapsed}ms)`);
 
   if (res.status === 401 && !AUTH_BOOTSTRAP_PATHS.has(path)) {
     const nextAccessToken = await refreshAccessToken();
     if (nextAccessToken) {
       headers["Authorization"] = `Bearer ${nextAccessToken}`;
-      res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+      res = await fetchWithAndroidFallback(path, { ...options, headers });
     }
   }
 
