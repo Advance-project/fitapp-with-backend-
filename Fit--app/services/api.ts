@@ -360,6 +360,12 @@ export const workoutApi = {
 
   getTemplates: () => request<WorkoutTemplate[]>("/workouts/templates"),
 
+  saveTemplate: (payload: { name: string; exercises: WorkoutTemplateExercise[] }) =>
+    request<WorkoutTemplate>("/workouts/templates", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   deleteTemplate: (templateId: string) =>
     request<void>(`/workouts/templates/${templateId}`, {
       method: "DELETE",

@@ -103,6 +103,8 @@ export type RootStackParamList = {
     | {
         selectedExercises?: ExerciseItem[];
         startFresh?: boolean;
+        mode?: "create_routine" | "log_workout";
+        templateName?: string;
       }
     | undefined;
 

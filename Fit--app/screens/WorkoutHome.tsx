@@ -21,6 +21,12 @@ import {
 type Nav = NativeStackNavigationProp<RootStackParamList, "WorkoutHome">;
 type Route = RouteProp<RootStackParamList, "WorkoutHome">;
 
+const parseApiDate = (value: string) => {
+  // Older records can arrive without timezone suffix; treat them as UTC.
+  const hasTimeZone = /([zZ]|[+-]\d{2}:\d{2})$/.test(value);
+  return new Date(hasTimeZone ? value : `${value}Z`);
+};
+
 export default function WorkoutHome() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
@@ -84,6 +90,8 @@ export default function WorkoutHome() {
     navigation.navigate("LogWorkout", {
       selectedExercises,
       startFresh: true,
+      mode: "log_workout",
+      templateName: template.name,
     });
   };
 
@@ -97,7 +105,7 @@ export default function WorkoutHome() {
             <TouchableOpacity
               activeOpacity={0.9}
               style={styles.cardSmall}
-              onPress={() => navigation.navigate("LogWorkout")}
+              onPress={() => navigation.navigate("LogWorkout", { startFresh: true, mode: "create_routine" })}
             >
               <Text style={styles.cardText}>Create{"\n"}new routine</Text>
             </TouchableOpacity>
@@ -180,7 +188,7 @@ export default function WorkoutHome() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.listRowText}>{item.template_name}</Text>
                     <Text style={styles.historySubText}>
-                      {new Date(item.logged_at).toLocaleDateString()} | {item.total_sets} sets | {item.total_volume} kg
+                      {parseApiDate(item.logged_at).toLocaleDateString()} | {item.total_sets} sets | {item.total_volume} kg
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -255,9 +263,9 @@ export default function WorkoutHome() {
 
               {!!openHistory && (
                 <View style={styles.workoutCard}>
-                  <Text style={styles.workoutTitle}>{openHistory.title}</Text>
+                  <Text style={styles.workoutTitle}>Workout Summary</Text>
                   <Text style={styles.setLine}>
-                    {new Date(openHistory.logged_at).toLocaleString()} | {openHistory.total_sets} sets | {openHistory.total_volume} kg
+                    {parseApiDate(openHistory.logged_at).toLocaleString()} | {openHistory.total_sets} sets | {openHistory.total_volume} kg
                   </Text>
 
                   {openHistory.exercises.map((ex) => (

@@ -1,6 +1,6 @@
 from typing import Optional
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ReturnDocument
@@ -345,7 +345,7 @@ async def upsert_log_workout_draft(
                 "user_id": user_id,
                 "exercises": exercises,
                 "elapsed_seconds": elapsed_seconds,
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc),
             }
         },
         upsert=True,
@@ -360,7 +360,7 @@ async def clear_log_workout_draft(user_id: str) -> bool:
 
 
 def _history_cutoff_utc(now: Optional[datetime] = None) -> datetime:
-    current = now or datetime.utcnow()
+    current = now or datetime.now(timezone.utc)
     start_of_week = (current - timedelta(days=current.weekday())).replace(
         hour=0,
         minute=0,
@@ -380,31 +380,7 @@ async def save_logged_workout(
     template_name: str,
     exercises: list[dict],
 ) -> dict:
-    now = datetime.utcnow()
-
-    template_exercises = [
-        {
-            "id": ex["id"],
-            "name": ex["name"],
-            "muscle": ex["muscle"],
-        }
-        for ex in exercises
-    ]
-
-    await _workout_templates().find_one_and_update(
-        {"user_id": user_id, "name": template_name},
-        {
-            "$set": {
-                "user_id": user_id,
-                "name": template_name,
-                "exercises": template_exercises,
-                "updated_at": now,
-            },
-            "$setOnInsert": {"id": str(uuid.uuid4())},
-        },
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
-    )
+    now = datetime.now(timezone.utc)
 
     total_sets = sum(len(ex.get("sets", [])) for ex in exercises)
     total_volume = 0
@@ -426,6 +402,25 @@ async def save_logged_workout(
 
     await prune_workout_history(user_id)
     return _clean(history_doc)
+
+
+async def save_workout_template_only(user_id: str, name: str, exercises: list[dict]) -> dict:
+    now = datetime.now(timezone.utc)
+    doc = await _workout_templates().find_one_and_update(
+        {"user_id": user_id, "name": name},
+        {
+            "$set": {
+                "user_id": user_id,
+                "name": name,
+                "exercises": exercises,
+                "updated_at": now,
+            },
+            "$setOnInsert": {"id": str(uuid.uuid4())},
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return _clean(doc)
 
 
 async def get_workout_templates(user_id: str) -> list[dict]:

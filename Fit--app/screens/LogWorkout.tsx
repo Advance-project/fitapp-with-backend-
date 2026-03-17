@@ -24,7 +24,12 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
   key: string;
   name: string;
-  params?: { selectedExercises?: ExerciseItem[]; startFresh?: boolean };
+  params?: {
+    selectedExercises?: ExerciseItem[];
+    startFresh?: boolean;
+    mode?: "create_routine" | "log_workout";
+    templateName?: string;
+  };
 };
 
 type SetRow = {
@@ -41,6 +46,9 @@ type ExerciseBlock = ExerciseItem & {
 export default function LogWorkout() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+
+  const isLogMode = route.params?.mode === "log_workout";
+  const routineTemplateName = route.params?.templateName ?? "";
 
   const [seconds, setSeconds] = useState(0);
   const [workoutExercises, setWorkoutExercises] = useState<ExerciseBlock[]>([]);
@@ -66,6 +74,9 @@ export default function LogWorkout() {
     let active = true;
 
     if (route.params?.startFresh) {
+      logWorkoutApi.clearDraft().catch(() => {});
+      setWorkoutExercises([]);
+      setSeconds(0);
       setDraftReady(true);
       return () => {
         active = false;
@@ -308,7 +319,8 @@ export default function LogWorkout() {
   };
 
   
-  const saveToFolder = async () => {
+  // create_routine mode: saves just the exercise list as a template (no history)
+  const saveRoutineTemplate = async () => {
     if (!workoutExercises.length) {
       setScreenMessage("At least one exercise should be added.");
       return;
@@ -317,31 +329,72 @@ export default function LogWorkout() {
     const name = folderName.trim();
     if (!name) return;
 
-    const exercises: WorkoutExercise[] = workoutExercises.map((ex) => {
-      const sets = ex.sets.map((s) => ({
+    const exercises = workoutExercises.map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+    }));
+
+    try {
+      await workoutApi.saveTemplate({ name, exercises });
+    } catch (error) {
+      setScreenMessage(error instanceof Error ? error.message : "Failed to save routine.");
+      return;
+    }
+
+    setCreateOpen(false);
+    setFolderName("");
+
+    try {
+      await logWorkoutApi.clearDraft();
+    } catch {
+      // Ignore clear failures; user already navigated away.
+    }
+
+    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+  };
+
+  // log_workout mode: saves the workout with sets/kg/reps to history using the template name
+  const saveWorkoutLog = async () => {
+    if (!workoutExercises.length) {
+      setScreenMessage("At least one exercise should be added.");
+      return;
+    }
+
+    if (!routineTemplateName.trim()) {
+      setScreenMessage("Template name is missing for this routine.");
+      return;
+    }
+
+    const exercises: WorkoutExercise[] = workoutExercises.map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+      sets: ex.sets.map((s) => ({
         kg: Number(s.kg || 0),
         reps: Number(s.reps || 0),
-      }));
-      return {
-        id: ex.id,
-        name: ex.name,
-        muscle: ex.muscle,
-        sets,
-      };
-    });
+      })),
+    }));
+
+    const hasExerciseWithNoSets = exercises.some((ex) => ex.sets.length === 0);
+    const hasInvalidSetValues = exercises.some((ex) =>
+      ex.sets.some((set) => set.kg <= 0 || set.reps <= 0)
+    );
+
+    if (hasExerciseWithNoSets || hasInvalidSetValues) {
+      setScreenMessage("Invalid workout session logged please enter correct logs");
+      return;
+    }
 
     try {
       await workoutApi.saveLoggedWorkout({
-        template_name: name,
+        template_name: routineTemplateName,
         exercises,
       });
     } catch (error) {
       setScreenMessage(error instanceof Error ? error.message : "Failed to save workout.");
       return;
     }
-
-    setCreateOpen(false);
-    setFolderName("");
 
     try {
       await logWorkoutApi.clearDraft();
@@ -370,9 +423,48 @@ export default function LogWorkout() {
       setScreenMessage("At least one exercise should be added.");
       return;
     }
-
     setScreenMessage("");
-    setCreateOpen(true);
+    if (isLogMode) {
+      Alert.alert(
+        "Save workout",
+        "Do you want to save this workout to history?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Save",
+            onPress: () => {
+              saveWorkoutLog();
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+    } else {
+      setCreateOpen(true);
+    }
+  };
+
+  const confirmSaveRoutineTemplate = () => {
+    const name = folderName.trim();
+    if (!name) {
+      setScreenMessage("Please enter a routine name.");
+      return;
+    }
+
+    Alert.alert(
+      "Save routine",
+      `Save routine \"${name}\" to created routines?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save",
+          onPress: () => {
+            saveRoutineTemplate();
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   const discardWorkout = async () => {
@@ -384,6 +476,24 @@ export default function LogWorkout() {
       // Keep navigation behavior even if clear fails.
     }
     navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+  };
+
+  const confirmDiscardWorkout = () => {
+    Alert.alert(
+      "Discard workout",
+      "Are you sure you want to discard this workout? This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            discardWorkout();
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   return (
@@ -424,19 +534,21 @@ export default function LogWorkout() {
               Add an exercise to start your workout
             </Text>
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={openAddExercise}>
-              <Text style={styles.primaryBtnText}>＋ Add Exercise</Text>
-            </TouchableOpacity>
+            {!isLogMode ? (
+              <TouchableOpacity style={styles.primaryBtn} onPress={openAddExercise}>
+                <Text style={styles.primaryBtnText}>＋ Add Exercise</Text>
+              </TouchableOpacity>
+            ) : null}
 
             <View style={styles.twoBtnsRow}>
               <TouchableOpacity
                 style={styles.grayBtn}
                 onPress={openCreateModal}
               >
-                <Text style={styles.grayBtnText}>Create</Text>
+                <Text style={styles.grayBtnText}>{isLogMode ? "Save Workout" : "Create"}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.grayBtn} onPress={discardWorkout}>
+              <TouchableOpacity style={styles.grayBtn} onPress={confirmDiscardWorkout}>
                 <Text style={styles.redBtnText}>Discard Workout</Text>
               </TouchableOpacity>
             </View>
@@ -518,22 +630,24 @@ export default function LogWorkout() {
                 </View>
               ))}
 
-              <TouchableOpacity
-                style={[styles.primaryBtn, { marginTop: 8 }]}
-                onPress={openAddExercise}
-              >
-                <Text style={styles.primaryBtnText}>＋ Add Exercise</Text>
-              </TouchableOpacity>
+              {!isLogMode ? (
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { marginTop: 8 }]}
+                  onPress={openAddExercise}
+                >
+                  <Text style={styles.primaryBtnText}>＋ Add Exercise</Text>
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.twoBtnsRow}>
                 <TouchableOpacity
                   style={styles.grayBtn}
                   onPress={openCreateModal}
                 >
-                  <Text style={styles.grayBtnText}>Create</Text>
+                  <Text style={styles.grayBtnText}>{isLogMode ? "Save Workout" : "Create"}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.grayBtn} onPress={discardWorkout}>
+                <TouchableOpacity style={styles.grayBtn} onPress={confirmDiscardWorkout}>
                   <Text style={styles.redBtnText}>Discard Workout</Text>
                 </TouchableOpacity>
               </View>
@@ -552,7 +666,7 @@ export default function LogWorkout() {
             onPress={() => setCreateOpen(false)}
           >
             <Pressable style={styles.modalCard} onPress={() => {}}>
-              <Text style={styles.modalTitle}>Save to Folder</Text>
+              <Text style={styles.modalTitle}>Save routine template</Text>
 
               <TextInput
                 value={folderName}
@@ -569,7 +683,7 @@ export default function LogWorkout() {
                   <Text style={styles.modalBtnGhostText}>Cancel</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.modalBtn} onPress={saveToFolder}>
+                <TouchableOpacity style={styles.modalBtn} onPress={confirmSaveRoutineTemplate}>
                   <Text style={styles.modalBtnText}>Save</Text>
                 </TouchableOpacity>
               </View>

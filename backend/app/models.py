@@ -166,6 +166,11 @@ class SaveLoggedWorkoutRequest(BaseModel):
     exercises: list[WorkoutHistoryExercise]
 
 
+class SaveTemplateRequest(BaseModel):
+    name: str
+    exercises: list[WorkoutTemplateExercise]
+
+
 class WorkoutHistoryResponse(BaseModel):
     id: str
     template_name: str
