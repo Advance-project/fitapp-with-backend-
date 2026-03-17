@@ -8,6 +8,7 @@ import {
   ScrollView,
   Modal,
   Pressable,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -15,16 +16,15 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
   RootStackParamList,
   ExerciseItem,
-  WorkoutData,
   WorkoutExercise,
-  WorkoutSet,
 } from "../App";
+import { logWorkoutApi, workoutApi } from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
   key: string;
   name: string;
-  params?: { selectedExercises?: ExerciseItem[] };
+  params?: { selectedExercises?: ExerciseItem[]; startFresh?: boolean };
 };
 
 type SetRow = {
@@ -51,6 +51,9 @@ export default function LogWorkout() {
   const [createOpen, setCreateOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [screenMessage, setScreenMessage] = useState("");
+  const [menuExerciseId, setMenuExerciseId] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -59,10 +62,74 @@ export default function LogWorkout() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    if (route.params?.startFresh) {
+      setDraftReady(true);
+      return () => {
+        active = false;
+      };
+    }
+
+    (async () => {
+      try {
+        const draft = await logWorkoutApi.getDraft();
+        if (!active || !draft.exercises.length) return;
+
+        const draftExercises: ExerciseBlock[] = draft.exercises.map((ex) => ({
+          id: ex.id,
+          name: ex.name,
+          muscle: ex.muscle,
+          sets: ex.sets.length
+            ? ex.sets.map((set, idx) => ({
+                id: set.id || String(idx + 1),
+                kg: set.kg ?? "",
+                reps: set.reps ?? "",
+                done: !!set.done,
+              }))
+            : [{ id: "1", kg: "", reps: "", done: false }],
+        }));
+
+        setWorkoutExercises((prev) => {
+          const merged = new Map<string, ExerciseBlock>();
+          for (const ex of draftExercises) merged.set(ex.id, ex);
+          for (const ex of prev) {
+            if (!merged.has(ex.id)) merged.set(ex.id, ex);
+          }
+          return Array.from(merged.values());
+        });
+
+        if (draft.elapsed_seconds > 0) {
+          setSeconds(draft.elapsed_seconds);
+        }
+      } catch {
+        // Keep local state only when draft API is unavailable.
+      } finally {
+        if (active) setDraftReady(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   
   useEffect(() => {
     const incoming = route.params?.selectedExercises ?? [];
     if (!incoming.length) return;
+
+    if (route.params?.startFresh) {
+      setWorkoutExercises(
+        incoming.map((ex) => ({
+          ...ex,
+          sets: [{ id: "1", kg: "", reps: "", done: false }],
+        }))
+      );
+      setSeconds(0);
+      return;
+    }
 
     setWorkoutExercises((prev) => {
       const prevIds = new Set(prev.map((e) => e.id));
@@ -78,6 +145,49 @@ export default function LogWorkout() {
       return merged;
     });
   }, [route.params?.selectedExercises]);
+
+  const toDraftPayloadExercises = (items: ExerciseBlock[]) =>
+    items.map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+      sets: ex.sets.map((s) => ({
+        id: s.id,
+        kg: s.kg,
+        reps: s.reps,
+        done: s.done,
+      })),
+    }));
+
+  const saveDraftNow = async () => {
+    if (!draftReady) return;
+    try {
+      await logWorkoutApi.saveDraft({
+        exercises: toDraftPayloadExercises(workoutExercises),
+        elapsed_seconds: seconds,
+      });
+    } catch {
+      // Ignore transient network errors for autosave.
+    }
+  };
+
+  useEffect(() => {
+    if (!draftReady) return;
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = setTimeout(() => {
+      saveDraftNow();
+    }, 350);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [workoutExercises, draftReady]);
 
   const goBackToHome = () => navigation.navigate("WorkoutHome");
   const hasExercises = workoutExercises.length > 0;
@@ -112,6 +222,71 @@ export default function LogWorkout() {
     );
   };
 
+  const removeSet = (exerciseId: string, setId: string) => {
+    setWorkoutExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) return ex;
+
+        const filtered = ex.sets.filter((s) => s.id !== setId);
+        const reindexed = filtered.map((s, idx) => ({ ...s, id: String(idx + 1) }));
+
+        return {
+          ...ex,
+          sets: reindexed,
+        };
+      })
+    );
+  };
+
+  const removeExercise = (exerciseId: string) => {
+    setWorkoutExercises((prev) => prev.filter((ex) => ex.id !== exerciseId));
+  };
+
+  const confirmRemoveSet = (exerciseId: string, setId: string) => {
+    Alert.alert(
+      "Remove set",
+      `Remove set ${setId}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => removeSet(exerciseId, setId),
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const openExerciseMenu = (exerciseId: string) => {
+    setMenuExerciseId(exerciseId);
+  };
+
+  const closeExerciseMenu = () => {
+    setMenuExerciseId(null);
+  };
+
+  const menuExercise = workoutExercises.find((ex) => ex.id === menuExerciseId) ?? null;
+
+  const confirmRemoveExercise = (exerciseId: string) => {
+    Alert.alert(
+      "Remove exercise",
+      "Remove this exercise and all its sets?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            removeExercise(exerciseId);
+            closeExerciseMenu();
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
   const updateSetField = (
     exerciseId: string,
     setId: string,
@@ -133,7 +308,7 @@ export default function LogWorkout() {
   };
 
   
-  const saveToFolder = () => {
+  const saveToFolder = async () => {
     if (!workoutExercises.length) {
       setScreenMessage("At least one exercise should be added.");
       return;
@@ -143,7 +318,7 @@ export default function LogWorkout() {
     if (!name) return;
 
     const exercises: WorkoutExercise[] = workoutExercises.map((ex) => {
-      const sets: WorkoutSet[] = ex.sets.map((s) => ({
+      const sets = ex.sets.map((s) => ({
         kg: Number(s.kg || 0),
         reps: Number(s.reps || 0),
       }));
@@ -155,23 +330,32 @@ export default function LogWorkout() {
       };
     });
 
-    const savedWorkout: WorkoutData = {
-      createdAt: Date.now(),
-      title: `Workout ${new Date().toLocaleDateString()}`,
-      exercises,
-    };
+    try {
+      await workoutApi.saveLoggedWorkout({
+        template_name: name,
+        exercises,
+      });
+    } catch (error) {
+      setScreenMessage(error instanceof Error ? error.message : "Failed to save workout.");
+      return;
+    }
 
     setCreateOpen(false);
     setFolderName("");
 
-    navigation.navigate("WorkoutHome", {
-      savedFolderName: name,
-      savedWorkout,
-    });
+    try {
+      await logWorkoutApi.clearDraft();
+    } catch {
+      // Ignore clear failures; user already navigated away.
+    }
+
+    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
   };
 
  
-  const openAddExercise = () => {
+  const openAddExercise = async () => {
+    await saveDraftNow();
+
     const existing: ExerciseItem[] = workoutExercises.map((e) => ({
       id: e.id,
       name: e.name,
@@ -189,6 +373,17 @@ export default function LogWorkout() {
 
     setScreenMessage("");
     setCreateOpen(true);
+  };
+
+  const discardWorkout = async () => {
+    setWorkoutExercises([]);
+    setScreenMessage("");
+    try {
+      await logWorkoutApi.clearDraft();
+    } catch {
+      // Keep navigation behavior even if clear fails.
+    }
+    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
   };
 
   return (
@@ -241,7 +436,7 @@ export default function LogWorkout() {
                 <Text style={styles.grayBtnText}>Create</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.grayBtn} onPress={goBackToHome}>
+              <TouchableOpacity style={styles.grayBtn} onPress={discardWorkout}>
                 <Text style={styles.redBtnText}>Discard Workout</Text>
               </TouchableOpacity>
             </View>
@@ -260,6 +455,9 @@ export default function LogWorkout() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.exerciseName}>{ex.name}</Text>
                     </View>
+                    <TouchableOpacity onPress={() => openExerciseMenu(ex.id)}>
+                      <Text style={styles.menuDots}>⋮</Text>
+                    </TouchableOpacity>
                   </View>
 
                   <View style={styles.tableHeader}>
@@ -275,7 +473,9 @@ export default function LogWorkout() {
 
                   {ex.sets.map((set) => (
                     <View key={set.id} style={styles.tableRow}>
-                      <Text style={[styles.td, styles.colSet]}>{set.id}</Text>
+                      <View style={styles.colSetTouchable}>
+                        <Text style={[styles.td, styles.colSet, styles.setNumberTouch]}>{set.id}</Text>
+                      </View>
                       <Text style={[styles.td, styles.colPrevious, styles.previousValue]}>- kg</Text>
 
                       <TextInput
@@ -333,7 +533,7 @@ export default function LogWorkout() {
                   <Text style={styles.grayBtnText}>Create</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.grayBtn} onPress={goBackToHome}>
+                <TouchableOpacity style={styles.grayBtn} onPress={discardWorkout}>
                   <Text style={styles.redBtnText}>Discard Workout</Text>
                 </TouchableOpacity>
               </View>
@@ -373,6 +573,46 @@ export default function LogWorkout() {
                   <Text style={styles.modalBtnText}>Save</Text>
                 </TouchableOpacity>
               </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal visible={!!menuExercise} transparent animationType="fade">
+          <Pressable style={styles.modalOverlay} onPress={closeExerciseMenu}>
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <Text style={styles.modalTitle}>{menuExercise?.name ?? "Exercise"}</Text>
+
+              {menuExercise ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.menuActionBtn, styles.menuActionDanger]}
+                    onPress={() => confirmRemoveExercise(menuExercise.id)}
+                  >
+                    <Text style={styles.menuActionDangerText}>Remove exercise</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.menuSectionTitle}>Remove a set</Text>
+                  {menuExercise.sets.map((set) => (
+                    <TouchableOpacity
+                      key={set.id}
+                      style={styles.menuActionBtn}
+                      onPress={() => {
+                        confirmRemoveSet(menuExercise.id, set.id);
+                        closeExerciseMenu();
+                      }}
+                    >
+                      <Text style={styles.menuActionText}>Remove set {set.id}</Text>
+                    </TouchableOpacity>
+                  ))}
+
+                  <TouchableOpacity
+                    style={[styles.menuActionBtn, styles.menuCancelBtn]}
+                    onPress={closeExerciseMenu}
+                  >
+                    <Text style={styles.menuCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
             </Pressable>
           </Pressable>
         </Modal>
@@ -511,6 +751,15 @@ const styles = StyleSheet.create({
   previousValue: { color: "#9ca3af" },
 
   tableRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
+  colSetTouchable: {
+    width: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+  },
+  setNumberTouch: {
+    textAlign: "center",
+  },
   td: { fontSize: 20, fontWeight: "700", color: "#111827" },
   inputCell: {
     backgroundColor: "#fff",
@@ -576,4 +825,39 @@ const styles = StyleSheet.create({
   modalBtnText: { color: "#fff", fontWeight: "900" },
   modalBtnGhost: { backgroundColor: "#f3f4f6" },
   modalBtnGhostText: { color: "#0b1220", fontWeight: "900" },
+
+  menuSectionTitle: {
+    marginTop: 14,
+    marginBottom: 8,
+    color: "#6b7280",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  menuActionBtn: {
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  menuActionText: {
+    color: "#111827",
+    fontWeight: "700",
+  },
+  menuActionDanger: {
+    backgroundColor: "#fee2e2",
+  },
+  menuActionDangerText: {
+    color: "#b91c1c",
+    fontWeight: "800",
+  },
+  menuCancelBtn: {
+    backgroundColor: "#e5e7eb",
+    marginTop: 14,
+  },
+  menuCancelText: {
+    color: "#111827",
+    fontWeight: "800",
+    textAlign: "center",
+  },
 });

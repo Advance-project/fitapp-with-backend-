@@ -94,13 +94,17 @@ export type RootStackParamList = {
   
   WorkoutHome:
     | {
-        savedFolderName?: string;
-        savedWorkout?: WorkoutData;
+        refreshAt?: number;
         savedProgram?: SavedProgram;
       }
     | undefined;
 
-  LogWorkout: { selectedExercises?: ExerciseItem[] } | undefined;
+  LogWorkout:
+    | {
+        selectedExercises?: ExerciseItem[];
+        startFresh?: boolean;
+      }
+    | undefined;
 
   AddExercise: { existingExercises?: ExerciseItem[] } | undefined;
 

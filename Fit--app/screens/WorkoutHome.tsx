@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,115 +11,81 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type { RootStackParamList, WorkoutData } from "../App";
+import type { RootStackParamList, ExerciseItem } from "../App";
+import {
+  workoutApi,
+  type WorkoutTemplate,
+  type WorkoutHistoryItem,
+} from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "WorkoutHome">;
 type Route = RouteProp<RootStackParamList, "WorkoutHome">;
-
-type Folder = {
-  name: string;
-  workouts: WorkoutData[];
-};
 
 export default function WorkoutHome() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
 
-  const [folders, setFolders] = useState<Folder[]>([
-    {
-      name: "Beginner",
-      workouts: [
-        {
-          createdAt: 1741651200000,
-          title: "Workout 2026-03-11",
-          exercises: [
-            {
-              id: "air-bike-1",
-              name: "Air Bike",
-              muscle: "Cardio",
-              sets: [
-                { kg: 20, reps: 4 },
-                { kg: 30, reps: 8 },
-                { kg: 50, reps: 10 },
-              ],
-            },
-            {
-              id: "arnold-press-1",
-              name: "Arnold Press (Dumbbell)",
-              muscle: "Shoulders",
-              sets: [
-                { kg: 40, reps: 10 },
-                { kg: 50, reps: 10 },
-                { kg: 60, reps: 12 },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      name: "Strength",
-      workouts: [
-        {
-          createdAt: 1741651200001,
-          title: "Workout 2026-03-11",
-          exercises: [
-            {
-              id: "air-bike-2",
-              name: "Air Bike",
-              muscle: "Cardio",
-              sets: [
-                { kg: 20, reps: 4 },
-                { kg: 30, reps: 8 },
-                { kg: 50, reps: 10 },
-              ],
-            },
-            {
-              id: "arnold-press-2",
-              name: "Arnold Press (Dumbbell)",
-              muscle: "Shoulders",
-              sets: [
-                { kg: 40, reps: 10 },
-                { kg: 50, reps: 10 },
-                { kg: 60, reps: 12 },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ]);
-
-  const lastSavedAtRef = useRef<number | null>(null);
+  const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
+  const [history, setHistory] = useState<WorkoutHistoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [screenMessage, setScreenMessage] = useState("");
 
   useEffect(() => {
-    const savedFolderName = route.params?.savedFolderName;
-    const savedWorkout = route.params?.savedWorkout;
-
-    if (!savedFolderName || !savedWorkout) return;
-    if (lastSavedAtRef.current === savedWorkout.createdAt) return;
-
-    lastSavedAtRef.current = savedWorkout.createdAt;
-
-    setFolders((prev) => {
-      const idx = prev.findIndex((f) => f.name === savedFolderName);
-      if (idx === -1) {
-        return [{ name: savedFolderName, workouts: [savedWorkout] }, ...prev];
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [templateRows, historyRows] = await Promise.all([
+          workoutApi.getTemplates(),
+          workoutApi.getHistory(),
+        ]);
+        if (!active) return;
+        setTemplates(templateRows);
+        setHistory(historyRows);
+        setScreenMessage("");
+      } catch (error) {
+        if (!active) return;
+        setScreenMessage(error instanceof Error ? error.message : "Failed to load workouts.");
+      } finally {
+        if (active) setLoading(false);
       }
-      const next = [...prev];
-      next[idx] = { ...next[idx], workouts: [savedWorkout, ...next[idx].workouts] };
-      return next;
-    });
-  }, [route.params?.savedFolderName, route.params?.savedWorkout]);
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [route.params?.refreshAt]);
 
-  const [openFolder, setOpenFolder] = useState<Folder | null>(null);
+  const [openTemplate, setOpenTemplate] = useState<WorkoutTemplate | null>(null);
+  const [openHistory, setOpenHistory] = useState<WorkoutHistoryItem | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
-  const removeFolder = (name: string) => {
-    setFolders((prev) => prev.filter((f) => f.name !== name));
+  const removeTemplate = async (templateId: string) => {
+    try {
+      await workoutApi.deleteTemplate(templateId);
+      setTemplates((prev) => prev.filter((t) => t.id !== templateId));
+      if (openTemplate?.id === templateId) {
+        setOpenTemplate(null);
+      }
+    } catch (error) {
+      setScreenMessage(error instanceof Error ? error.message : "Failed to remove routine.");
+    }
   };
 
-  const folderNames = useMemo(() => folders.map((f) => f.name), [folders]);
+  const templateNames = useMemo(() => templates.map((t) => t.name), [templates]);
+
+  const startTemplateWorkout = (template: WorkoutTemplate) => {
+    const selectedExercises: ExerciseItem[] = template.exercises.map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+    }));
+    setOpenTemplate(null);
+    navigation.navigate("LogWorkout", {
+      selectedExercises,
+      startFresh: true,
+    });
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -172,23 +138,60 @@ export default function WorkoutHome() {
           </View>
 
           <View style={styles.listBox}>
-            {folders.map((folder: Folder, idx: number) => (
-              <View key={`${folder.name}-${idx}`}>
+            {!templates.length ? (
+              <View style={styles.emptyRow}>
+                <Text style={styles.emptyText}>No routines yet. Save a logged workout to create one.</Text>
+              </View>
+            ) : null}
+
+            {templates.map((template: WorkoutTemplate, idx: number) => (
+              <View key={`${template.id}-${idx}`}>
                 <TouchableOpacity
                   activeOpacity={0.85}
                   style={styles.listRow}
-                  onPress={() => setOpenFolder(folder)}
+                  onPress={() => setOpenTemplate(template)}
                 >
-                  <Text style={styles.listRowText}>{folder.name}</Text>
+                  <Text style={styles.listRowText}>{template.name}</Text>
                   <Text style={styles.smallCount}>
-                    {folder.workouts.length ? `${folder.workouts.length}` : ""}
+                    {template.exercises.length ? `${template.exercises.length} ex` : ""}
                   </Text>
                 </TouchableOpacity>
 
-                {idx !== folders.length - 1 && <View style={styles.rowDivider} />}
+                {idx !== templates.length - 1 && <View style={styles.rowDivider} />}
               </View>
             ))}
           </View>
+
+          <Text style={styles.sectionTitle}>Workout history</Text>
+          <View style={styles.listBox}>
+            {!history.length ? (
+              <View style={styles.emptyRow}>
+                <Text style={styles.emptyText}>This section shows current and previous week logs.</Text>
+              </View>
+            ) : null}
+
+            {history.map((item, idx) => (
+              <View key={item.id}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.listRow}
+                  onPress={() => setOpenHistory(item)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.listRowText}>{item.template_name}</Text>
+                    <Text style={styles.historySubText}>
+                      {new Date(item.logged_at).toLocaleDateString()} | {item.total_sets} sets | {item.total_volume} kg
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                {idx !== history.length - 1 && <View style={styles.rowDivider} />}
+              </View>
+            ))}
+          </View>
+
+          {!!screenMessage && <Text style={styles.screenWarningText}>{screenMessage}</Text>}
+          {loading ? <Text style={styles.loadingText}>Loading workouts...</Text> : null}
 
           <View style={{ height: 90 }} />
         </ScrollView>
@@ -211,38 +214,63 @@ export default function WorkoutHome() {
           </TouchableOpacity>
         </View>
 
-        <Modal transparent visible={!!openFolder} animationType="fade">
-          <Pressable style={styles.modalOverlay} onPress={() => setOpenFolder(null)}>
+        <Modal transparent visible={!!openTemplate} animationType="fade">
+          <Pressable style={styles.modalOverlay} onPress={() => setOpenTemplate(null)}>
             <Pressable style={styles.folderModalCard} onPress={() => {}}>
               <View style={styles.folderModalTop}>
-                <Text style={styles.folderModalTitle}>{openFolder?.name}</Text>
-                <TouchableOpacity onPress={() => setOpenFolder(null)}>
+                <Text style={styles.folderModalTitle}>{openTemplate?.name}</Text>
+                <TouchableOpacity onPress={() => setOpenTemplate(null)}>
                   <Text style={styles.modalClose}>✕</Text>
                 </TouchableOpacity>
               </View>
 
-              {openFolder?.workouts?.length ? (
-                openFolder.workouts.map((w: WorkoutData) => (
-                  <View key={w.createdAt} style={styles.workoutCard}>
-                    <Text style={styles.workoutTitle}>{w.title}</Text>
-
-                    {w.exercises.map((ex) => (
-                      <View key={ex.id} style={{ marginTop: 8 }}>
-                        <Text style={styles.exerciseLine}>• {ex.name}</Text>
-
-                        {ex.sets.map((s, idx) => (
-                          <Text key={`${ex.id}-${idx}`} style={styles.setLine}>
-                            Set {idx + 1}: {s.kg} kg × {s.reps}
-                          </Text>
-                        ))}
-                      </View>
-                    ))}
-                  </View>
+              {openTemplate?.exercises?.length ? (
+                openTemplate.exercises.map((ex) => (
+                  <Text key={ex.id} style={styles.exerciseLine}>
+                    • {ex.name} ({ex.muscle})
+                  </Text>
                 ))
               ) : (
                 <Text style={{ color: "#6b7280", fontWeight: "700" }}>
-                  No workouts saved in this folder yet.
+                  Empty template.
                 </Text>
+              )}
+
+              <TouchableOpacity style={styles.startTemplateBtn} onPress={() => openTemplate && startTemplateWorkout(openTemplate)}>
+                <Text style={styles.startTemplateText}>Start this routine</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal transparent visible={!!openHistory} animationType="fade">
+          <Pressable style={styles.modalOverlay} onPress={() => setOpenHistory(null)}>
+            <Pressable style={styles.folderModalCard} onPress={() => {}}>
+              <View style={styles.folderModalTop}>
+                <Text style={styles.folderModalTitle}>{openHistory?.template_name}</Text>
+                <TouchableOpacity onPress={() => setOpenHistory(null)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {!!openHistory && (
+                <View style={styles.workoutCard}>
+                  <Text style={styles.workoutTitle}>{openHistory.title}</Text>
+                  <Text style={styles.setLine}>
+                    {new Date(openHistory.logged_at).toLocaleString()} | {openHistory.total_sets} sets | {openHistory.total_volume} kg
+                  </Text>
+
+                  {openHistory.exercises.map((ex) => (
+                    <View key={ex.id} style={{ marginTop: 8 }}>
+                      <Text style={styles.exerciseLine}>• {ex.name}</Text>
+                      {ex.sets.map((s, idx) => (
+                        <Text key={`${ex.id}-${idx}`} style={styles.setLine}>
+                          Set {idx + 1}: {s.kg} kg × {s.reps}
+                        </Text>
+                      ))}
+                    </View>
+                  ))}
+                </View>
               )}
             </Pressable>
           </Pressable>
@@ -258,10 +286,16 @@ export default function WorkoutHome() {
                 </TouchableOpacity>
               </View>
 
-              {folderNames.map((name: string) => (
+              {templateNames.map((name: string) => (
                 <View key={name} style={styles.editRow}>
                   <Text style={styles.editRowText}>{name}</Text>
-                  <TouchableOpacity onPress={() => removeFolder(name)}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const template = templates.find((t) => t.name === name);
+                      if (!template) return;
+                      removeTemplate(template.id);
+                    }}
+                  >
                     <Text style={styles.removeText}>Remove</Text>
                   </TouchableOpacity>
                 </View>
@@ -372,6 +406,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#e6ebf2",
     marginLeft: 16,
   },
+  emptyRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  emptyText: {
+    color: "#6b7280",
+    fontWeight: "700",
+  },
+  historySubText: {
+    marginTop: 4,
+    color: "#6b7280",
+    fontWeight: "700",
+  },
+  screenWarningText: {
+    marginTop: 10,
+    color: "#b45309",
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    fontWeight: "700",
+  },
+  loadingText: {
+    marginTop: 10,
+    color: "#6b7280",
+    fontWeight: "700",
+  },
 
   bottomTabs: {
     height: 64,
@@ -432,6 +495,14 @@ const styles = StyleSheet.create({
   workoutTitle: { fontSize: 16, fontWeight: "900", color: "#0b1220" },
   exerciseLine: { marginTop: 6, fontWeight: "800", color: "#111827" },
   setLine: { marginTop: 2, color: "#6b7280", fontWeight: "700" },
+  startTemplateBtn: {
+    marginTop: 14,
+    backgroundColor: "#1e88e5",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  startTemplateText: { color: "#fff", fontWeight: "800" },
 
   editRow: {
     flexDirection: "row",

@@ -131,6 +131,74 @@ export type RefreshResponse = {
   token_type: string;
 };
 
+export type FilterOptionsResponse = {
+  equipment_options: string[];
+  muscle_options: string[];
+};
+
+export type ExerciseCatalogItem = {
+  id: string;
+  name: string;
+  muscle: string;
+  equipment: string;
+};
+
+export type LogWorkoutSetDraft = {
+  id: string;
+  kg: string;
+  reps: string;
+  done: boolean;
+};
+
+export type LogWorkoutExerciseDraft = {
+  id: string;
+  name: string;
+  muscle: string;
+  sets: LogWorkoutSetDraft[];
+};
+
+export type LogWorkoutDraftResponse = {
+  user_id: string;
+  exercises: LogWorkoutExerciseDraft[];
+  elapsed_seconds: number;
+  updated_at?: string | null;
+};
+
+export type WorkoutTemplateExercise = {
+  id: string;
+  name: string;
+  muscle: string;
+};
+
+export type WorkoutTemplate = {
+  id: string;
+  name: string;
+  exercises: WorkoutTemplateExercise[];
+  updated_at?: string | null;
+};
+
+export type WorkoutHistorySet = {
+  kg: number;
+  reps: number;
+};
+
+export type WorkoutHistoryExercise = {
+  id: string;
+  name: string;
+  muscle: string;
+  sets: WorkoutHistorySet[];
+};
+
+export type WorkoutHistoryItem = {
+  id: string;
+  template_name: string;
+  title: string;
+  exercises: WorkoutHistoryExercise[];
+  total_sets: number;
+  total_volume: number;
+  logged_at: string;
+};
+
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
 const AUTH_BOOTSTRAP_PATHS = new Set([
@@ -255,4 +323,47 @@ export const authApi = {
 
   deleteMe: () =>
     request<void>("/auth/me", { method: "DELETE" }),
+};
+
+export const filterApi = {
+  getOptions: () => request<FilterOptionsResponse>("/filters/options"),
+};
+
+export const exerciseApi = {
+  getAll: () => request<ExerciseCatalogItem[]>("/exercises"),
+};
+
+export const logWorkoutApi = {
+  getDraft: () => request<LogWorkoutDraftResponse>("/log-workout/draft"),
+
+  saveDraft: (payload: { exercises: LogWorkoutExerciseDraft[]; elapsed_seconds: number }) =>
+    request<LogWorkoutDraftResponse>("/log-workout/draft", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  clearDraft: () =>
+    request<void>("/log-workout/draft", {
+      method: "DELETE",
+    }),
+};
+
+export const workoutApi = {
+  saveLoggedWorkout: (payload: {
+    template_name: string;
+    exercises: WorkoutHistoryExercise[];
+  }) =>
+    request<WorkoutHistoryItem>("/workouts/log", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getTemplates: () => request<WorkoutTemplate[]>("/workouts/templates"),
+
+  deleteTemplate: (templateId: string) =>
+    request<void>(`/workouts/templates/${templateId}`, {
+      method: "DELETE",
+    }),
+
+  getHistory: () => request<WorkoutHistoryItem[]>("/workouts/history"),
 };

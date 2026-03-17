@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
+from datetime import datetime
 import re
 
 
@@ -95,3 +96,81 @@ class RefreshResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class FilterOptionsResponse(BaseModel):
+    equipment_options: list[str]
+    muscle_options: list[str]
+
+
+class ExerciseResponse(BaseModel):
+    id: str
+    name: str
+    muscle: str
+    equipment: str
+
+
+class LogWorkoutSetDraft(BaseModel):
+    id: str
+    kg: str
+    reps: str
+    done: bool = False
+
+
+class LogWorkoutExerciseDraft(BaseModel):
+    id: str
+    name: str
+    muscle: str
+    sets: list[LogWorkoutSetDraft]
+
+
+class LogWorkoutDraftUpsertRequest(BaseModel):
+    exercises: list[LogWorkoutExerciseDraft]
+    elapsed_seconds: int = 0
+
+
+class LogWorkoutDraftResponse(BaseModel):
+    user_id: str
+    exercises: list[LogWorkoutExerciseDraft]
+    elapsed_seconds: int = 0
+    updated_at: Optional[datetime] = None
+
+
+class WorkoutTemplateExercise(BaseModel):
+    id: str
+    name: str
+    muscle: str
+
+
+class WorkoutTemplateResponse(BaseModel):
+    id: str
+    name: str
+    exercises: list[WorkoutTemplateExercise]
+    updated_at: Optional[datetime] = None
+
+
+class WorkoutHistorySet(BaseModel):
+    kg: int
+    reps: int
+
+
+class WorkoutHistoryExercise(BaseModel):
+    id: str
+    name: str
+    muscle: str
+    sets: list[WorkoutHistorySet]
+
+
+class SaveLoggedWorkoutRequest(BaseModel):
+    template_name: str
+    exercises: list[WorkoutHistoryExercise]
+
+
+class WorkoutHistoryResponse(BaseModel):
+    id: str
+    template_name: str
+    title: str
+    exercises: list[WorkoutHistoryExercise]
+    total_sets: int
+    total_volume: int
+    logged_at: datetime

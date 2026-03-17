@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList, ExerciseItem } from "../App";
+import { exerciseApi, filterApi } from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
@@ -21,13 +22,12 @@ type Route = {
   params?: { existingExercises?: ExerciseItem[] };
 };
 
-// Placeholder — will be replaced with data fetched from the backend
-const EXERCISES: ExerciseItem[] = [
-  { id: "1", name: "Barbell Back Squat", muscle: "Legs" },
-];
+type ExerciseCatalogItem = ExerciseItem & {
+  equipment: string;
+};
 
-const EQUIPMENT_OPTIONS = ["All Equipment", "None", "Barbell", "Dumbbell", "Machine"] as const;
-const MUSCLE_OPTIONS = [
+const DEFAULT_EQUIPMENT_OPTIONS = ["All Equipment", "None", "Barbell", "Dumbbell", "Machine"];
+const DEFAULT_MUSCLE_OPTIONS = [
   "All Muscles",
   "Chest",
   "Biceps",
@@ -37,13 +37,14 @@ const MUSCLE_OPTIONS = [
   "Abs",
   "Legs",
   "Cardio",
-] as const;
+];
 
 export default function AddExercise() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
 
   const [query, setQuery] = useState("");
+  const [exercises, setExercises] = useState<ExerciseCatalogItem[]>([]);
 
   
   const existingExercises = route.params?.existingExercises ?? [];
@@ -53,23 +54,70 @@ export default function AddExercise() {
   );
 
   
-  const [equipment, setEquipment] = useState<(typeof EQUIPMENT_OPTIONS)[number]>("All Equipment");
-  const [muscleFilter, setMuscleFilter] = useState<(typeof MUSCLE_OPTIONS)[number]>("All Muscles");
+  const [equipmentOptions, setEquipmentOptions] = useState<string[]>(DEFAULT_EQUIPMENT_OPTIONS);
+  const [muscleOptions, setMuscleOptions] = useState<string[]>(DEFAULT_MUSCLE_OPTIONS);
+  const [equipment, setEquipment] = useState<string>("All Equipment");
+  const [muscleFilter, setMuscleFilter] = useState<string>("All Muscles");
 
   const [equipmentSheetOpen, setEquipmentSheetOpen] = useState(false);
   const [muscleSheetOpen, setMuscleSheetOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        const [data, exerciseRows] = await Promise.all([
+          filterApi.getOptions(),
+          exerciseApi.getAll(),
+        ]);
+        if (!active) return;
+
+        setExercises(exerciseRows);
+
+        if (data.equipment_options.length > 0) {
+          setEquipmentOptions(data.equipment_options);
+          if (!data.equipment_options.includes(equipment)) {
+            setEquipment("All Equipment");
+          }
+        }
+        if (data.muscle_options.length > 0) {
+          setMuscleOptions(data.muscle_options);
+          if (!data.muscle_options.includes(muscleFilter)) {
+            setMuscleFilter("All Muscles");
+          }
+        }
+      } catch {
+        // Keep fallback options when backend is unavailable.
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const data = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const allEquipmentSelected = equipment === "All Equipment";
+    const allMusclesSelected = muscleFilter === "All Muscles";
 
-    let list = EXERCISES;
+    if (allEquipmentSelected && allMusclesSelected && !q) {
+      return exercises;
+    }
+
+    let list = exercises;
 
     
-    if (muscleFilter !== "All Muscles") {
+    if (!allMusclesSelected) {
       list = list.filter((x) => x.muscle === muscleFilter);
+    }
+
+    if (!allEquipmentSelected) {
+      list = list.filter((x) => x.equipment === equipment);
     }
 
     
@@ -79,7 +127,7 @@ export default function AddExercise() {
     return list.filter(
       (x) => x.name.toLowerCase().includes(q) || x.muscle.toLowerCase().includes(q)
     );
-  }, [query, muscleFilter]);
+  }, [query, muscleFilter, equipment, exercises]);
 
   const toggleSelect = (id: string) => {
     
@@ -96,12 +144,23 @@ export default function AddExercise() {
   const selectedCount = selectedIds.size;
 
   const addSelectedToWorkout = () => {
-  const newExercises = EXERCISES.filter((e) => selectedIds.has(e.id));
+    const newExercises: ExerciseItem[] = exercises
+      .filter((e) => selectedIds.has(e.id))
+      .map(({ id, name, muscle }) => ({ id, name, muscle }));
+
+    const mergedById = new Map<string, ExerciseItem>();
+    for (const ex of existingExercises) {
+      mergedById.set(ex.id, ex);
+    }
+    for (const ex of newExercises) {
+      mergedById.set(ex.id, ex);
+    }
+    const selectedExercises = Array.from(mergedById.values());
 
     
     navigation.navigate({
       name: "LogWorkout" as never,
-      params: { selectedExercises: newExercises } as never,
+      params: { selectedExercises } as never,
       merge: true,
     } as never);
 
@@ -188,7 +247,7 @@ export default function AddExercise() {
                   <Text style={[styles.rowTitle, alreadyAdded && { color: "#9aa3af" }]}>
                     {item.name}
                   </Text>
-                  <Text style={styles.rowSub}>{item.muscle}</Text>
+                  <Text style={styles.rowSub}>{item.muscle} · {item.equipment}</Text>
                 </View>
 
                 <View
@@ -239,7 +298,7 @@ export default function AddExercise() {
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>Equipment</Text>
 
-              {EQUIPMENT_OPTIONS.map((opt) => {
+              {equipmentOptions.map((opt) => {
                 const active = opt === equipment;
                 return (
                   <TouchableOpacity
@@ -270,7 +329,7 @@ export default function AddExercise() {
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>Muscle Group</Text>
 
-              {MUSCLE_OPTIONS.map((opt) => {
+              {muscleOptions.map((opt) => {
                 const active = opt === muscleFilter;
                 return (
                   <TouchableOpacity
