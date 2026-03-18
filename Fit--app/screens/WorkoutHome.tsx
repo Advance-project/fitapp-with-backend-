@@ -27,6 +27,18 @@ const parseApiDate = (value: string) => {
   return new Date(hasTimeZone ? value : `${value}Z`);
 };
 
+const cardioIntensityLabel = (value?: number) => {
+  if (value === 1) return "Low";
+  if (value === 2) return "Medium";
+  if (value === 3) return "High";
+  return "-";
+};
+
+const formatWeightNumber = (value?: number) => {
+  if (value === undefined || value === null) return "-";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+};
+
 export default function WorkoutHome() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
@@ -105,7 +117,7 @@ export default function WorkoutHome() {
             <TouchableOpacity
               activeOpacity={0.9}
               style={styles.cardSmall}
-              onPress={() => navigation.navigate("LogWorkout", { startFresh: true, mode: "create_routine" })}
+              onPress={() => navigation.navigate("CreateRoutine", { startFresh: true })}
             >
               <Text style={styles.cardText}>Create{"\n"}new routine</Text>
             </TouchableOpacity>
@@ -188,7 +200,7 @@ export default function WorkoutHome() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.listRowText}>{item.template_name}</Text>
                     <Text style={styles.historySubText}>
-                      {parseApiDate(item.logged_at).toLocaleDateString()} | {item.total_sets} sets | {item.total_volume} kg
+                      {parseApiDate(item.logged_at).toLocaleDateString()} | {item.total_sets} sets | {formatWeightNumber(item.total_volume)} kg
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -253,7 +265,7 @@ export default function WorkoutHome() {
 
         <Modal transparent visible={!!openHistory} animationType="fade">
           <Pressable style={styles.modalOverlay} onPress={() => setOpenHistory(null)}>
-            <Pressable style={styles.folderModalCard} onPress={() => {}}>
+            <Pressable style={[styles.folderModalCard, styles.historyModalCard]} onPress={() => {}}>
               <View style={styles.folderModalTop}>
                 <Text style={styles.folderModalTitle}>{openHistory?.template_name}</Text>
                 <TouchableOpacity onPress={() => setOpenHistory(null)}>
@@ -262,23 +274,31 @@ export default function WorkoutHome() {
               </View>
 
               {!!openHistory && (
-                <View style={styles.workoutCard}>
-                  <Text style={styles.workoutTitle}>Workout Summary</Text>
-                  <Text style={styles.setLine}>
-                    {parseApiDate(openHistory.logged_at).toLocaleString()} | {openHistory.total_sets} sets | {openHistory.total_volume} kg
-                  </Text>
+                <ScrollView
+                  style={styles.historyModalScroll}
+                  contentContainerStyle={styles.historyModalScrollContent}
+                  showsVerticalScrollIndicator
+                >
+                  <View style={styles.workoutCard}>
+                    <Text style={styles.workoutTitle}>Workout Summary</Text>
+                    <Text style={styles.setLine}>
+                      {parseApiDate(openHistory.logged_at).toLocaleString()} | {openHistory.total_sets} sets | {formatWeightNumber(openHistory.total_volume)} kg
+                    </Text>
 
-                  {openHistory.exercises.map((ex) => (
-                    <View key={ex.id} style={{ marginTop: 8 }}>
-                      <Text style={styles.exerciseLine}>• {ex.name}</Text>
-                      {ex.sets.map((s, idx) => (
-                        <Text key={`${ex.id}-${idx}`} style={styles.setLine}>
-                          Set {idx + 1}: {s.kg} kg × {s.reps}
-                        </Text>
-                      ))}
-                    </View>
-                  ))}
-                </View>
+                    {openHistory.exercises.map((ex) => (
+                      <View key={ex.id} style={{ marginTop: 8 }}>
+                        <Text style={styles.exerciseLine}>• {ex.name}</Text>
+                        {ex.sets.map((s, idx) => (
+                          <Text key={`${ex.id}-${idx}`} style={styles.setLine}>
+                            {ex.muscle.trim().toLowerCase() === "cardio"
+                              ? `Set ${idx + 1}: Intensity ${cardioIntensityLabel(s.intensity)} × ${s.time_minutes ?? "-"} min`
+                              : `Set ${idx + 1}: ${formatWeightNumber(s.kg)} kg × ${s.reps ?? "-"}`}
+                          </Text>
+                        ))}
+                      </View>
+                    ))}
+                  </View>
+                </ScrollView>
               )}
             </Pressable>
           </Pressable>
@@ -484,6 +504,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 18,
+  },
+  historyModalCard: {
+    maxHeight: "80%",
+  },
+  historyModalScroll: {
+    maxHeight: "100%",
+  },
+  historyModalScrollContent: {
+    paddingBottom: 6,
   },
   folderModalTop: {
     flexDirection: "row",

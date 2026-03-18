@@ -127,8 +127,10 @@ class ExerciseResponse(BaseModel):
 
 class LogWorkoutSetDraft(BaseModel):
     id: str
-    kg: str
-    reps: str
+    kg: str = ""
+    reps: str = ""
+    intensity: str = ""
+    time_minutes: str = ""
     done: bool = False
 
 
@@ -165,8 +167,10 @@ class WorkoutTemplateResponse(BaseModel):
 
 
 class WorkoutHistorySet(BaseModel):
-    kg: int
-    reps: int
+    kg: Optional[float] = None
+    reps: Optional[int] = None
+    intensity: Optional[int] = None
+    time_minutes: Optional[int] = None
 
 
 class WorkoutHistoryExercise(BaseModel):
@@ -192,7 +196,7 @@ class WorkoutHistoryResponse(BaseModel):
     title: str
     exercises: list[WorkoutHistoryExercise]
     total_sets: int
-    total_volume: int
+    total_volume: float
     logged_at: datetime
 
 

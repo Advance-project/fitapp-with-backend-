@@ -390,10 +390,10 @@ async def save_logged_workout(
     now = datetime.now(timezone.utc)
 
     total_sets = sum(len(ex.get("sets", [])) for ex in exercises)
-    total_volume = 0
+    total_volume = 0.0
     for ex in exercises:
         for set_row in ex.get("sets", []):
-            total_volume += int(set_row.get("kg", 0) or 0) * int(set_row.get("reps", 0) or 0)
+            total_volume += float(set_row.get("kg", 0) or 0) * int(set_row.get("reps", 0) or 0)
 
     history_doc = {
         "id": str(uuid.uuid4()),
@@ -402,7 +402,7 @@ async def save_logged_workout(
         "title": f"Workout {now.date().isoformat()}",
         "exercises": exercises,
         "total_sets": total_sets,
-        "total_volume": total_volume,
+        "total_volume": round(total_volume, 2),
         "logged_at": now,
     }
     await _workout_history().insert_one(history_doc)

@@ -147,6 +147,8 @@ export type LogWorkoutSetDraft = {
   id: string;
   kg: string;
   reps: string;
+  intensity?: string;
+  time_minutes?: string;
   done: boolean;
 };
 
@@ -178,8 +180,10 @@ export type WorkoutTemplate = {
 };
 
 export type WorkoutHistorySet = {
-  kg: number;
-  reps: number;
+  kg?: number;
+  reps?: number;
+  intensity?: number;
+  time_minutes?: number;
 };
 
 export type WorkoutHistoryExercise = {

@@ -177,14 +177,14 @@ export default function Profile() {
       <View style={styles.screen}>
         
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerLeft}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
 
           <Text style={styles.headerTitle}>Profile</Text>
 
-          <TouchableOpacity style={styles.headerBtn} onPress={startEditingProfile}>
-            <Text style={styles.headerEdit}>Edit</Text>
+          <TouchableOpacity style={styles.headerRight} onPress={startEditingProfile}>
+            <Text style={styles.headerLink}>Edit</Text>
           </TouchableOpacity>
         </View>
 
@@ -353,23 +353,26 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e7eb",
     backgroundColor: "#fff",
   },
-  headerBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#f3f4f6",
-    alignItems: "center",
+  headerLeft: {
+    width: 44,
+    height: 36,
     justifyContent: "center",
   },
-  headerEdit: {
-    fontSize: 12,
-    color: "#0b1220",
-    fontWeight: "800",
+  headerRight: {
+    width: 44,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "flex-end",
+  },
+  headerLink: {
+    fontSize: 17,
+    color: "#1976d2",
+    fontWeight: "500",
   },
   backArrow: {
-    fontSize: 24,
+    fontSize: 26,
     color: "#111827",
-    fontWeight: "700",
+    fontWeight: "600",
   },
   headerTitle: {
     fontSize: 18,

@@ -179,6 +179,12 @@ export default function AddExercise() {
         } as never,
         merge: true,
       } as never);
+    } else if (returnTo === "CreateRoutine") {
+      navigation.navigate({
+        name: "CreateRoutine" as never,
+        params: { selectedExercises } as never,
+        merge: true,
+      } as never);
     } else {
       navigation.navigate({
         name: "LogWorkout" as never,

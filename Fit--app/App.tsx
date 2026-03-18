@@ -8,6 +8,7 @@ import Signup from "./screens/Signup";
 import Onboarding from "./screens/Onboarding";
 import WorkoutHome from "./screens/WorkoutHome";
 import LogWorkout from "./screens/LogWorkout";
+import CreateRoutine from "./screens/CreateRoutine";
 import AddExercise from "./screens/AddExercise";
 import ExploreRoutines from "./screens/ExploreRoutines";
 import Program from "./screens/Program";
@@ -43,7 +44,12 @@ export type ExerciseItem = {
 };
 
 
-export type WorkoutSet = { kg: number; reps: number };
+export type WorkoutSet = {
+  kg?: number;
+  reps?: number;
+  intensity?: number;
+  time_minutes?: number;
+};
 
 export type WorkoutExercise = ExerciseItem & {
   sets: WorkoutSet[];
@@ -108,6 +114,13 @@ export type RootStackParamList = {
       }
     | undefined;
 
+  CreateRoutine:
+    | {
+        selectedExercises?: ExerciseItem[];
+        startFresh?: boolean;
+      }
+    | undefined;
+
   AddExercise: { existingExercises?: ExerciseItem[]; returnTo?: string; title?: string; targetMuscle?: string } | undefined;
 
 
@@ -168,6 +181,7 @@ export default function App() {
         <Stack.Screen name="Onboarding" component={Onboarding} />
         <Stack.Screen name="WorkoutHome" component={WorkoutHome} />
         <Stack.Screen name="LogWorkout" component={LogWorkout} />
+        <Stack.Screen name="CreateRoutine" component={CreateRoutine} />
         <Stack.Screen name="AddExercise" component={AddExercise} />
 
         

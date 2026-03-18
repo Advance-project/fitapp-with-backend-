@@ -32,11 +32,25 @@ async def save_logged_workout(
             detail="Invalid workout session logged please enter correct logs",
         )
 
-    has_invalid_set_values = any(
-        (set_row.kg <= 0 or set_row.reps <= 0)
-        for exercise in payload.exercises
-        for set_row in exercise.sets
-    )
+    has_invalid_set_values = False
+    for exercise in payload.exercises:
+        is_cardio = exercise.muscle.strip().lower() == "cardio"
+        for set_row in exercise.sets:
+            if is_cardio:
+                intensity = set_row.intensity or 0
+                time_minutes = set_row.time_minutes or 0
+                if intensity <= 0 or time_minutes <= 0:
+                    has_invalid_set_values = True
+                    break
+            else:
+                kg = set_row.kg or 0
+                reps = set_row.reps or 0
+                if kg <= 0 or reps <= 0:
+                    has_invalid_set_values = True
+                    break
+        if has_invalid_set_values:
+            break
+
     if has_invalid_set_values:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
