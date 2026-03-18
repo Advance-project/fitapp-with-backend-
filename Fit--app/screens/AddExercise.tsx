@@ -249,17 +249,22 @@ export default function AddExercise() {
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
             const isSelected = selectedIds.has(item.id);
+            const isAlreadyAdded = !isTemplateEditMode && existingIds.has(item.id);
 
             return (
               <TouchableOpacity
                 style={[
                   styles.row,
                   isSelected && styles.rowSelected,
+                  isAlreadyAdded && styles.rowAlreadyAdded,
                 ]}
-                onPress={() => toggleSelect(item.id)}
+                onPress={() => {
+                  if (isAlreadyAdded) return;
+                  toggleSelect(item.id);
+                }}
                 activeOpacity={0.85}
               >
-                {isSelected ? (
+                {isSelected || isAlreadyAdded ? (
                   <View style={styles.selectedBar} />
                 ) : (
                   <View style={styles.selectedBarGhost} />
@@ -280,13 +285,14 @@ export default function AddExercise() {
                   style={[
                     styles.rightIcon,
                     isSelected && styles.rightIconSelected,
+                    isAlreadyAdded && styles.rightIconAlreadyAdded,
                   ]}
                 >
-                  {isSelected ? (
+                  {isSelected || isAlreadyAdded ? (
                     <Text
                       style={[
                         styles.rightIconCheck,
-                        isSelected && styles.rightIconCheckSelected,
+                        (isSelected || isAlreadyAdded) && styles.rightIconCheckSelected,
                       ]}
                     >
                       ✓
@@ -432,6 +438,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   rowSelected: { backgroundColor: "#fbfdff" },
+  rowAlreadyAdded: { backgroundColor: "#f8fafc" },
   selectedBar: {
     width: 6,
     height: 54,
@@ -473,6 +480,10 @@ const styles = StyleSheet.create({
   rightIconSelected: {
     backgroundColor: "#1e88e5",
     borderColor: "#1e88e5",
+  },
+  rightIconAlreadyAdded: {
+    backgroundColor: "#94a3b8",
+    borderColor: "#94a3b8",
   },
   rightIconCheck: {
     fontSize: 18,
