@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,32 +8,13 @@ import {
   Modal,
   Pressable,
   TextInput,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { isAdminAuthenticated } from "./userStore";
-
-type AdminUser = {
-  _id: string;
-  email: string;
-  username: string;
-  password_hash: string;
-  role: "admin" | "user";
-  is_active: boolean;
-  created_at: string;
-  last_login_at: string;
-  profile: {
-    age: number;
-    height_cm: number;
-    weight_kg: number;
-    sex: string;
-    goal: string;
-  };
-  preferences: {
-    units: string;
-    privacy: { store_chat_history: boolean };
-  };
-};
+import { adminApi, AdminUserItem } from "../services/api";
 
 export default function AdminUserDetails() {
   const navigation = useNavigation<any>();
@@ -45,60 +26,52 @@ export default function AdminUserDetails() {
     }
   }, [navigation]);
 
-  const initialUser: AdminUser | undefined = route.params?.user;
-  const [user, setUser] = useState<AdminUser | undefined>(initialUser);
+  const [user, setUser] = useState<AdminUserItem | undefined>(route.params?.user);
   const [editOpen, setEditOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [editEmail, setEditEmail] = useState("");
-  const [editAge, setEditAge] = useState("");
-  const [editHeight, setEditHeight] = useState("");
-  const [editWeight, setEditWeight] = useState("");
+  const [editUsername, setEditUsername] = useState("");
 
   const title = user?.username ?? "User";
 
-  const display = useMemo(() => {
-    if (!user) return null;
-
-    return {
-      core: [
-        { k: "email", v: user.email },
-        { k: "username", v: user.username },
-        { k: "created_at", v: user.created_at },
-      ],
-      profile: [
-        { k: "age", v: String(user.profile.age) },
-        { k: "height_cm", v: String(user.profile.height_cm) },
-        { k: "weight_kg", v: String(user.profile.weight_kg) },
-        { k: "sex", v: user.profile.sex },
-      ],
-    };
-  }, [user]);
-
   const openEditModal = () => {
     if (!user) return;
-
     setEditEmail(user.email);
-    setEditAge(String(user.profile.age));
-    setEditHeight(String(user.profile.height_cm));
-    setEditWeight(String(user.profile.weight_kg));
+    setEditUsername(user.username);
     setEditOpen(true);
   };
 
-  const handleSave = () => {
+  const cancelEditing = () => {
     if (!user) return;
-
-    setUser({
-      ...user,
-      email: editEmail,
-      profile: {
-        ...user.profile,
-        age: Number(editAge) || 0,
-        height_cm: Number(editHeight) || 0,
-        weight_kg: Number(editWeight) || 0,
-      },
-    });
-
+    setEditEmail(user.email);
+    setEditUsername(user.username);
     setEditOpen(false);
+  };
+
+  const handleSave = async () => {
+    if (!user) return;
+    const fields: { email?: string; username?: string } = {};
+    if (editEmail.trim() && editEmail.trim() !== user.email)
+      fields.email = editEmail.trim();
+    if (editUsername.trim() && editUsername.trim() !== user.username)
+      fields.username = editUsername.trim();
+    if (Object.keys(fields).length === 0) {
+      setEditOpen(false);
+      return;
+    }
+    try {
+      setSaving(true);
+      const updated = await adminApi.updateUser(user.id, fields);
+      setUser(updated);
+      setEditEmail(updated.email);
+      setEditUsername(updated.username);
+      setEditOpen(false);
+    } catch (e: any) {
+      Alert.alert("Error", e.message ?? "Failed to update user");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!user) {
@@ -110,6 +83,26 @@ export default function AdminUserDetails() {
       </SafeAreaView>
     );
   }
+
+  const rows = [
+    { k: "id", v: user.id },
+    { k: "email", v: user.email },
+    { k: "username", v: user.username },
+    { k: "role", v: user.role },
+    {
+      k: "created_at",
+      v: user.created_at
+        ? new Date(user.created_at).toLocaleString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "—",
+    },
+    { k: "password_hash", v: user.password_hash ?? "—" },
+  ];
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -128,24 +121,12 @@ export default function AdminUserDetails() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
-          {/* User */}
           <Text style={styles.sectionTitle}>User</Text>
           <View style={styles.card}>
-            {(display?.core ?? []).map((x, idx) => (
-              <View key={x.k} style={[styles.kvRow, idx !== 0 && styles.kvBorder]}>
+            {rows.map((x, idx) => (
+              <View key={x.k} style={[styles.kvRowStack, idx !== 0 && styles.kvBorder]}>
                 <Text style={styles.k}>{x.k}</Text>
-                <Text style={styles.v}>{x.v}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Profile */}
-          <Text style={styles.sectionTitle}>Profile</Text>
-          <View style={styles.card}>
-            {(display?.profile ?? []).map((x, idx) => (
-              <View key={x.k} style={[styles.kvRow, idx !== 0 && styles.kvBorder]}>
-                <Text style={styles.k}>{x.k}</Text>
-                <Text style={styles.v}>{x.v}</Text>
+                <Text style={styles.vWrap}>{x.v}</Text>
               </View>
             ))}
           </View>
@@ -154,54 +135,39 @@ export default function AdminUserDetails() {
         </ScrollView>
 
         <Modal transparent visible={editOpen} animationType="fade">
-          <Pressable style={styles.modalOverlay} onPress={() => setEditOpen(false)}>
+          <Pressable style={styles.modalOverlay} onPress={cancelEditing}>
             <Pressable style={styles.modalCard} onPress={() => {}}>
               <Text style={styles.modalTitle}>Edit User</Text>
 
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
-                style={styles.input}
                 value={editEmail}
                 onChangeText={setEditEmail}
-                placeholder="Enter email"
+                style={styles.input}
+                placeholder="Email"
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
 
-              <Text style={styles.inputLabel}>Age</Text>
+              <Text style={styles.inputLabel}>Username</Text>
               <TextInput
+                value={editUsername}
+                onChangeText={setEditUsername}
                 style={styles.input}
-                value={editAge}
-                onChangeText={setEditAge}
-                placeholder="Enter age"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.inputLabel}>Height (cm)</Text>
-              <TextInput
-                style={styles.input}
-                value={editHeight}
-                onChangeText={setEditHeight}
-                placeholder="Enter height"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.inputLabel}>Weight (kg)</Text>
-              <TextInput
-                style={styles.input}
-                value={editWeight}
-                onChangeText={setEditWeight}
-                placeholder="Enter weight"
-                keyboardType="numeric"
+                placeholder="Username"
+                autoCapitalize="none"
               />
 
               <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditOpen(false)}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={cancelEditing} disabled={saving}>
                   <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-                  <Text style={styles.saveText}>OK</Text>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.saveText}>Save</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -256,10 +222,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
   },
+  kvRowStack: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    flexDirection: "column",
+    gap: 4,
+  },
   kvBorder: { borderTopWidth: 1, borderTopColor: "#eef2f7" },
 
   k: { color: "#6b7280", fontWeight: "900" },
   v: { color: "#0b1220", fontWeight: "900" },
+  vWrap: { color: "#0b1220", fontWeight: "900", fontFamily: "monospace", fontSize: 13 },
 
   modalOverlay: {
     flex: 1,
@@ -276,8 +249,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "900",
     marginBottom: 14,
+    color: "#0b1220",
   },
-
   inputLabel: {
     fontSize: 14,
     fontWeight: "700",
@@ -285,14 +258,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     marginTop: 8,
   },
+
   input: {
     borderWidth: 1,
     borderColor: "#d1d5db",
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 15,
+    paddingVertical: 10,
+    fontSize: 14,
     backgroundColor: "#fff",
+    color: "#111827",
   },
 
   buttonRow: {

@@ -1,89 +1,56 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { isAdminAuthenticated } from "./userStore";
-
-const DUMMY_USERS = [
-  "Devanshu",
-  "Margin",
-  "Harsh",
-  "Andrew",
-  "Neha",
-  "Yogesh",
-  "Sahil",
-  "Jasdeep",
-  "Karan",
-  "Anjali",
-  "Mohit",
-  "Isha",
-];
+import { adminApi, AdminUserItem } from "../services/api";
 
 export default function AdminUsers() {
   const navigation = useNavigation<any>();
   const [q, setQ] = useState("");
+  const [users, setUsers] = useState<AdminUserItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await adminApi.getUsers();
+      setUsers(data);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAdminAuthenticated()) {
       navigation.replace("AdminLogin");
+      return;
     }
-  }, [navigation]);
+    loadUsers();
+  }, [navigation, loadUsers]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAdminAuthenticated()) {
+        return;
+      }
+      loadUsers();
+    }, [loadUsers])
+  );
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return DUMMY_USERS;
-    return DUMMY_USERS.filter((name) => name.toLowerCase().includes(s));
-  }, [q]);
-
-  const buildUserObject = (name: string) => {
-    const safe = name.toLowerCase().replace(/\s+/g, "");
-
-    
-    const createdAt = new Date("2026-01-25T10:15:00.000Z").toISOString();
-    const lastLoginAt = new Date("2026-01-30T14:20:00.000Z").toISOString();
-
-    const seed = safe.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-    const age = 18 + (seed % 20);
-    const height = 155 + (seed % 35);
-    const weight = 55 + (seed % 40);
-
-    const objectId = (
-      seed.toString(16).padStart(6, "0") +
-      "a1b2c3d4e5f6a7b8c9d0e1f2"
-    ).slice(0, 24);
-
-    const bcryptShort =
-      "$2b$10$" + (safe + "yy").slice(0, 22) + "AbC";
-
-    const email = name === "Devanshu" ? "devanshu@gmail.com" : `${safe}@example.com`;
-
-    return {
-      _id: objectId,
-      email: email,
-      username: safe,
-      password_hash: bcryptShort,
-      role: name === "Devanshu" ? "admin" : "user",
-      is_active: true,
-      created_at: createdAt,
-      last_login_at: lastLoginAt,
-      profile: {
-        age: age,
-        height_cm: height,
-        weight_kg: weight,
-        sex: seed % 2 === 0 ? "male" : "female",
-        goal:
-          seed % 3 === 0
-            ? "lose_fat_gain_muscle"
-            : seed % 3 === 1
-            ? "gain_muscle"
-            : "weight_loss",
-      },
-      preferences: {
-        units: "metric",
-        privacy: { store_chat_history: seed % 2 === 0 },
-      },
-    };
-  };
+    if (!s) return users;
+    return users.filter(
+      (u) =>
+        u.username.toLowerCase().includes(s) ||
+        u.email.toLowerCase().includes(s)
+    );
+  }, [q, users]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -111,23 +78,36 @@ export default function AdminUsers() {
 
           
           <View style={styles.listBox}>
-            {filtered.map((name, idx) => (
+            {loading && (
+              <View style={styles.emptyRow}>
+                <ActivityIndicator color="#1e88e5" />
+              </View>
+            )}
+
+            {!loading && error && (
+              <View style={styles.emptyRow}>
+                <Text style={[styles.emptyText, { color: "#e53935" }]}>{error}</Text>
+              </View>
+            )}
+
+            {!loading && !error && filtered.map((u) => (
               <TouchableOpacity
-                key={`${name}-${idx}`}
+                key={u.id}
                 style={styles.row}
                 activeOpacity={0.85}
                 onPress={() =>
-                  navigation.navigate("AdminUserDetails", {
-                    user: buildUserObject(name),
-                  })
+                  navigation.navigate("AdminUserDetails", { user: u })
                 }
               >
-                <Text style={styles.rowText}>{name}</Text>
+                <View>
+                  <Text style={styles.rowText}>{u.username}</Text>
+                  <Text style={styles.rowSub}>{u.email}</Text>
+                </View>
                 <Text style={styles.chevron}>›</Text>
               </TouchableOpacity>
             ))}
 
-            {filtered.length === 0 && (
+            {!loading && !error && filtered.length === 0 && (
               <View style={styles.emptyRow}>
                 <Text style={styles.emptyText}>No users found.</Text>
               </View>
@@ -192,6 +172,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   rowText: { fontSize: 16, fontWeight: "800", color: "#0b1220" },
+  rowSub: { fontSize: 13, color: "#6b7280", marginTop: 2 },
   chevron: { fontSize: 26, color: "#9aa6b2", paddingLeft: 12 },
 
   emptyRow: { paddingVertical: 18, paddingHorizontal: 16 },

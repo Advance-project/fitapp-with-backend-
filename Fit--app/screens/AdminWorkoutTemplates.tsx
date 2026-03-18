@@ -1,24 +1,36 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { isAdminAuthenticated } from "./userStore";
+import { globalTemplatesApi, GlobalTemplate } from "../services/api";
 
-type ProgramItem = {
-  id: string;
-  title: string;
-  subtitle: string;
-  targetMuscle: string;
-};
+function shortTargetMuscle(label: string): string {
+  const map: Record<string, string> = {
+    "Chest": "C",
+    "Back": "B",
+    "Shoulder": "S",
+    "Bicep / Back": "Bi/B",
+    "Chest / Tricep": "C/Tri",
+    "Shoulder / Abs": "S/Abs",
+    "Chest / Back / Shoulder / Bicep / Tricep": "UB (C/B/S/Bi/Tri)",
+    "Chest / Shoulder / Tricep": "Push (C/S/Tri)",
+    "Back / Bicep / Shoulder": "Pull (B/Bi/S)",
+  };
+  return map[label] ?? label;
+}
 
 export default function AdminWorkoutTemplates() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
 
   useEffect(() => {
     if (!isAdminAuthenticated()) {
@@ -26,22 +38,43 @@ export default function AdminWorkoutTemplates() {
     }
   }, [navigation]);
 
-  const [programs, setPrograms] = useState<ProgramItem[]>([
-    {
-      id: "default_template_1",
-      title: "C",
-      subtitle: "2",
-      targetMuscle: "Chest",
-    },
-  ]);
+  const [templates, setTemplates] = useState<GlobalTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleAddTemplate = (newTemplate: ProgramItem) => {
-    setPrograms((prev) => [...prev, newTemplate]);
-    navigation.goBack();
-  };
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const data = await globalTemplatesApi.getAll();
+      setTemplates(data);
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Failed to load templates.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchTemplates();
+    }, [fetchTemplates])
+  );
 
   const handleRemove = (id: string) => {
-    setPrograms((prev) => prev.filter((item) => item.id !== id));
+    Alert.alert("Remove template", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await globalTemplatesApi.delete(id);
+            setTemplates((prev) => prev.filter((t) => t.id !== id));
+          } catch (err) {
+            Alert.alert("Error", err instanceof Error ? err.message : "Failed to remove.");
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -65,45 +98,51 @@ export default function AdminWorkoutTemplates() {
 
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() =>
-              navigation.navigate("AddWorkoutTemplate", {
-                onSaveTemplate: handleAddTemplate,
-              })
-            }
+            onPress={() => navigation.navigate("AddWorkoutTemplate")}
           >
             <Text style={styles.addBtnText}>+ Add new template</Text>
           </TouchableOpacity>
 
-          {programs.map((p) => (
-            <View key={p.id} style={styles.programCard}>
-              <TouchableOpacity
-                style={styles.cardTop}
-                onPress={() =>
-                  navigation.navigate("Program", {
-                    programId: p.id,
-                    title: p.title,
-                    subtitle: p.subtitle,
-                  })
-                }
-              >
-                <View style={styles.programThumb}>
-                  <Text style={styles.programThumbText}>{p.targetMuscle}</Text>
-                </View>
+          {loading ? (
+            <ActivityIndicator style={{ marginTop: 40 }} color="#0b1220" />
+          ) : templates.length === 0 ? (
+            <Text style={styles.emptyText}>No templates yet. Add one above.</Text>
+          ) : (
+            templates.map((p) => (
+              <View key={p.id} style={styles.programCard}>
+                <TouchableOpacity
+                  style={styles.cardTop}
+                  onPress={() =>
+                    navigation.navigate("Program", {
+                      programId: p.id,
+                      title: p.name,
+                      subtitle: String(p.exercises.length),
+                      targetMuscle: p.target_muscle,
+                      exercises: p.exercises,
+                    })
+                  }
+                >
+                  <View style={styles.programThumb}>
+                    <Text style={styles.programThumbText} numberOfLines={1} ellipsizeMode="tail">
+                      {shortTargetMuscle(p.target_muscle)}
+                    </Text>
+                  </View>
 
-                <View style={styles.programInfo}>
-                  <Text style={styles.programTitle}>{p.title}</Text>
-                  <Text style={styles.programSub}>{p.subtitle} exercise</Text>
-                </View>
-              </TouchableOpacity>
+                  <View style={styles.programInfo}>
+                    <Text style={styles.programTitle}>{p.name}</Text>
+                    <Text style={styles.programSub}>{p.exercises.length} exercise</Text>
+                  </View>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.removeBtn}
-                onPress={() => handleRemove(p.id)}
-              >
-                <Text style={styles.removeBtnText}>Remove template</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+                <TouchableOpacity
+                  style={styles.removeBtn}
+                  onPress={() => handleRemove(p.id)}
+                >
+                  <Text style={styles.removeBtnText}>Remove template</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -168,11 +207,11 @@ const styles = StyleSheet.create({
 
   programCard: {
     backgroundColor: "#fff",
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#d9dee7",
-    padding: 16,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 12,
   },
 
   cardTop: {
@@ -180,18 +219,18 @@ const styles = StyleSheet.create({
   },
 
   programThumb: {
-    width: 100,
-    height: 100,
-    borderRadius: 16,
+    width: 116,
+    height: 72,
+    borderRadius: 12,
     backgroundColor: "#f1f3f6",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 14,
+    marginRight: 10,
     paddingHorizontal: 8,
   },
 
   programThumbText: {
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: "900",
     color: "#2583e8",
     textAlign: "center",
@@ -203,29 +242,37 @@ const styles = StyleSheet.create({
   },
 
   programTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "900",
     color: "#111827",
   },
 
   programSub: {
-    marginTop: 8,
+    marginTop: 6,
     color: "#6b7280",
     fontWeight: "800",
-    fontSize: 18,
+    fontSize: 13,
   },
 
   removeBtn: {
-    marginTop: 14,
+    marginTop: 10,
     borderWidth: 1,
     borderColor: "#ef4444",
-    borderRadius: 12,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingVertical: 8,
     alignItems: "center",
   },
 
   removeBtnText: {
     color: "#ef4444",
     fontWeight: "800",
+  },
+
+  emptyText: {
+    textAlign: "center",
+    marginTop: 40,
+    color: "#6b7280",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

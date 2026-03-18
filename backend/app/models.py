@@ -49,6 +49,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class UpdateUserRequest(BaseModel):
+    email: Optional[EmailStr] = None
     username: Optional[str] = None
     password: Optional[str] = None
 
@@ -83,6 +84,20 @@ class UserResponse(BaseModel):
     email: str
     username: str
     role: str
+
+
+class AdminUserResponse(BaseModel):
+    id: str
+    email: str
+    username: str
+    role: str
+    created_at: Optional[str] = None
+    password_hash: Optional[str] = None
+
+
+class AdminUpdateUserRequest(BaseModel):
+    email: Optional[str] = None
+    username: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
@@ -179,3 +194,23 @@ class WorkoutHistoryResponse(BaseModel):
     total_sets: int
     total_volume: int
     logged_at: datetime
+
+
+class GlobalTemplateExercise(BaseModel):
+    id: str
+    name: str
+    muscle: str
+
+
+class GlobalWorkoutTemplateResponse(BaseModel):
+    id: str
+    name: str
+    target_muscle: str
+    exercises: list[GlobalTemplateExercise]
+    created_at: Optional[datetime] = None
+
+
+class SaveGlobalTemplateRequest(BaseModel):
+    name: str
+    target_muscle: str
+    exercises: list[GlobalTemplateExercise]

@@ -7,10 +7,16 @@ import {
   TextInput,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isAdminAuthenticated } from "./userStore";
+import { globalTemplatesApi } from "../services/api";
+import type { ExerciseItem } from "../App";
+
+const ADMIN_TEMPLATE_DRAFT_KEY = "admin_template_draft_v1";
 
 export default function AddWorkoutTemplate() {
   const navigation = useNavigation<any>();
@@ -22,48 +28,137 @@ export default function AddWorkoutTemplate() {
     }
   }, [navigation]);
 
-  const [title, setTitle] = useState("");
-  const [subtitle, setSubtitle] = useState("3");
-  const [targetMuscle, setTargetMuscle] = useState("Bicep");
+  const [title, setTitle] = useState(route.params?.title ?? "");
+  const [targetMuscle, setTargetMuscle] = useState(route.params?.targetMuscle ?? "Chest");
+  const [selectedExercises, setSelectedExercises] = useState<ExerciseItem[]>(
+    route.params?.selectedExercises ?? []
+  );
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    if (!title.trim()) {
-      Alert.alert("Missing title", "Please enter template title.");
-      return;
-    }
+  // Restore unfinished admin template draft so values survive navigation hops.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(ADMIN_TEMPLATE_DRAFT_KEY);
+        if (!active || !raw) return;
+        const draft = JSON.parse(raw) as {
+          title?: string;
+          targetMuscle?: string;
+          selectedExercises?: ExerciseItem[];
+        };
 
-    if (!subtitle.trim()) {
-      Alert.alert("Missing number", "Please enter no of exercise.");
-      return;
-    }
+        if (route.params?.title === undefined && typeof draft.title === "string") {
+          setTitle(draft.title);
+        }
+        if (
+          route.params?.targetMuscle === undefined &&
+          typeof draft.targetMuscle === "string"
+        ) {
+          setTargetMuscle(draft.targetMuscle);
+        }
+        if (
+          route.params?.selectedExercises === undefined &&
+          Array.isArray(draft.selectedExercises)
+        ) {
+          setSelectedExercises(draft.selectedExercises);
+        }
+      } catch {
+        // Ignore draft parse/storage issues and proceed with in-memory state.
+      } finally {
+        if (active) setIsDraftLoaded(true);
+      }
+    })();
 
-    const newTemplate = {
-      id: `template_${Date.now()}`,
-      title: title.trim(),
-      subtitle: subtitle.trim() || "3",
-      targetMuscle,
+    return () => {
+      active = false;
     };
+  }, []);
 
-    if (route.params?.onSaveTemplate) {
-      route.params.onSaveTemplate(newTemplate);
-    } else {
-      navigation.goBack();
+  // Sync state from route params whenever they change (e.g., when returning from AddExercise)
+  useEffect(() => {
+    if (route.params?.title !== undefined) {
+      setTitle(route.params.title);
+    }
+    if (route.params?.targetMuscle !== undefined) {
+      setTargetMuscle(route.params.targetMuscle);
+    }
+    if (route.params?.selectedExercises !== undefined) {
+      setSelectedExercises(route.params.selectedExercises);
+    }
+  }, [
+    route.params?.title,
+    route.params?.targetMuscle,
+    route.params?.selectedExercises,
+  ]);
+
+  useEffect(() => {
+    if (!isDraftLoaded) return;
+    AsyncStorage.setItem(
+      ADMIN_TEMPLATE_DRAFT_KEY,
+      JSON.stringify({ title, targetMuscle, selectedExercises })
+    ).catch(() => {
+      // Best-effort persistence only.
+    });
+  }, [title, targetMuscle, selectedExercises, isDraftLoaded]);
+
+  const openAddExercise = () => {
+    navigation.navigate("AddExercise", {
+      existingExercises: selectedExercises,
+      returnTo: "AddWorkoutTemplate",
+      title,
+      targetMuscle,
+    } as never);
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      Alert.alert("Missing title", "Please enter a template title.");
+      return;
+    }
+    if (selectedExercises.length === 0) {
+      Alert.alert("No exercises", "Please add at least one exercise.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await globalTemplatesApi.create({
+        name: title.trim(),
+        target_muscle: targetMuscle,
+        exercises: selectedExercises.map(({ id, name, muscle }) => ({ id, name, muscle })),
+      });
+      await AsyncStorage.removeItem(ADMIN_TEMPLATE_DRAFT_KEY);
+      navigation.reset({
+        index: 1,
+        routes: [
+          { name: "Admin" },
+          { name: "AdminWorkoutTemplates", params: { refreshAt: Date.now() } },
+        ],
+      });
+    } catch (err) {
+      Alert.alert("Error", err instanceof Error ? err.message : "Failed to save template.");
+    } finally {
+      setSaving(false);
     }
   };
 
   const targetMuscleOptions = [
+    "Chest",
+    "Back",
+    "Shoulder",
     "Bicep",
     "Tricep",
-    "Back",
-    "Chest",
-    "Shoulder",
     "Legs",
     "Abs",
+    "Chest / Back / Shoulder / Bicep / Tricep",
+    "Chest / Shoulder / Tricep",
+    "Back / Bicep / Shoulder",
     "Bicep / Back",
     "Chest / Tricep",
-    "Shoulder / Back",
-    "Back / Bicep / Tricep",
-    "Chest / Shoulder / Tricep",
+    "Shoulder / Abs",
+    "Cardio",
   ];
 
   return (
@@ -92,15 +187,6 @@ export default function AddWorkoutTemplate() {
             onChangeText={setTitle}
           />
 
-          <Text style={styles.label}>No of exercise</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Example: 3"
-            value={subtitle}
-            onChangeText={setSubtitle}
-            keyboardType="numeric"
-          />
-
           <Text style={styles.label}>Target muscles</Text>
           <View style={styles.optionRow}>
             {targetMuscleOptions.map((item) => (
@@ -124,12 +210,36 @@ export default function AddWorkoutTemplate() {
             ))}
           </View>
 
+          <Text style={styles.label}>Exercises ({selectedExercises.length} selected)</Text>
+
+          {selectedExercises.length > 0 && (
+            <View style={styles.exerciseList}>
+              {selectedExercises.map((ex) => (
+                <View key={ex.id} style={styles.exerciseRow}>
+                  <Text style={styles.exerciseName}>{ex.name}</Text>
+                  <Text style={styles.exerciseMuscle}>{ex.muscle}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.addExerciseBtn} onPress={openAddExercise}>
+            <Text style={styles.addExerciseBtnText}>
+              {selectedExercises.length === 0 ? "+ Add exercises" : "Edit exercises"}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
-            style={styles.saveBtn}
+            style={[styles.saveBtn, saving && { opacity: 0.6 }]}
             onPress={handleSave}
             activeOpacity={0.85}
+            disabled={saving}
           >
-            <Text style={styles.saveBtnText}>Save template</Text>
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.saveBtnText}>Save template</Text>
+            )}
           </TouchableOpacity>
 
           <View style={{ height: 30 }} />
@@ -221,8 +331,53 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 
+  exerciseList: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#d9dee7",
+    marginBottom: 10,
+    overflow: "hidden",
+  },
+
+  exerciseRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+
+  exerciseName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+    flex: 1,
+  },
+
+  exerciseMuscle: {
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+
+  addExerciseBtn: {
+    backgroundColor: "#f3f4f6",
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  addExerciseBtnText: {
+    color: "#0b1220",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+
   saveBtn: {
-    marginTop: 24,
+    marginTop: 16,
     backgroundColor: "#0b1220",
     borderRadius: 14,
     paddingVertical: 15,

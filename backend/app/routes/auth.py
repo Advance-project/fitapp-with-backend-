@@ -8,6 +8,7 @@ from ..auth_utils import (
     create_refresh_token,
     decode_refresh_token,
     get_current_user,
+    require_admin,
 )
 from ..models import (
     SignupRequest,
@@ -15,7 +16,9 @@ from ..models import (
     AdminLoginRequest,
     RefreshTokenRequest,
     UpdateUserRequest,
+    AdminUpdateUserRequest,
     UserResponse,
+    AdminUserResponse,
     TokenResponse,
     RefreshResponse,
 )
@@ -162,19 +165,21 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 @router.put(
     "/me",
     response_model=UserResponse,
-    summary="Update the currently authenticated user's username or password",
+    summary="Update the currently authenticated user's email, username, or password",
 )
 async def update_me(
     payload: UpdateUserRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    if payload.username is None and payload.password is None:
+    if payload.email is None and payload.username is None and payload.password is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Provide at least one field to update (username or password)",
+            detail="Provide at least one field to update (email, username, or password)",
         )
 
     fields: dict = {}
+    if payload.email is not None:
+        fields["email"] = payload.email.lower()
     if payload.username is not None:
         fields["username"] = payload.username
     if payload.password is not None:
@@ -197,3 +202,42 @@ async def delete_me(current_user: dict = Depends(get_current_user)):
     deleted = await database.delete_user(current_user["id"])
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+
+# ── GET /auth/admin/users ─────────────────────────────────────────────────────
+
+@router.get(
+    "/admin/users",
+    response_model=list[AdminUserResponse],
+    summary="[Admin] List all registered users",
+)
+async def admin_list_users(admin: dict = Depends(require_admin)):
+    return await database.get_all_users()
+
+
+# ── PATCH /auth/admin/users/{user_id} ─────────────────────────────────────────
+
+@router.patch(
+    "/admin/users/{user_id}",
+    response_model=AdminUserResponse,
+    summary="[Admin] Update a user's email or username",
+)
+async def admin_update_user(
+    user_id: str,
+    payload: AdminUpdateUserRequest,
+    admin: dict = Depends(require_admin),
+):
+    fields: dict = {}
+    if payload.email is not None:
+        fields["email"] = payload.email.lower()
+    if payload.username is not None:
+        fields["username"] = payload.username
+    if not fields:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide at least one field to update (email or username)",
+        )
+    updated = await database.update_user(user_id, fields)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return updated

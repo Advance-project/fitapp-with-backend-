@@ -108,7 +108,7 @@ export type RootStackParamList = {
       }
     | undefined;
 
-  AddExercise: { existingExercises?: ExerciseItem[] } | undefined;
+  AddExercise: { existingExercises?: ExerciseItem[]; returnTo?: string; title?: string; targetMuscle?: string } | undefined;
 
 
   ExploreRoutines: undefined;
@@ -118,6 +118,8 @@ export type RootStackParamList = {
       viewOnly?: boolean;
       title?: string;
       subtitle?: string;
+      targetMuscle?: string;
+      exercises?: Array<{ id: string; name: string; muscle: string }>;
     }
   | undefined;
 
@@ -147,7 +149,7 @@ export type RootStackParamList = {
     | undefined;
 
   
-  AddWorkoutTemplate: undefined;
+  AddWorkoutTemplate: { selectedExercises?: ExerciseItem[] } | undefined;
 
 
   AdminStatistics: undefined;

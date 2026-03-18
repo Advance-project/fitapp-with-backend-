@@ -61,9 +61,13 @@ export default function Profile() {
   const { width: screenWidth } = useWindowDimensions();
   const cardWidth = Math.max(screenWidth - 28, 0);
 
-  const [editOpen, setEditOpen] = useState(false);
   const [weeklyIndex, setWeeklyIndex] = useState(1);
   const [weeklyChartWidth, setWeeklyChartWidth] = useState(0);
+  const [me, setMe] = useState<{ email: string; username: string } | null>(null);
+  const [draftEmail, setDraftEmail] = useState("");
+  const [draftUsername, setDraftUsername] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const weeklyScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -71,30 +75,63 @@ export default function Profile() {
     weeklyScrollRef.current?.scrollTo({ x: cardWidth, animated: false });
   }, [cardWidth]);
 
-  const [age, setAge] = useState("");
-  const [weight, setWeight] = useState("");
-  const [height, setHeight] = useState("");
-  const [email, setEmail] = useState("");
+  useEffect(() => {
+    let mounted = true;
+    authApi
+      .getMe()
+      .then((u) => {
+        if (!mounted) return;
+        setMe({ email: u.email, username: u.username });
+        setDraftEmail(u.email);
+        setDraftUsername(u.username);
+      })
+      .catch(() => {
+        // Keep profile usable even if /auth/me temporarily fails.
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-  const [draftAge, setDraftAge] = useState("");
-  const [draftWeight, setDraftWeight] = useState("");
-  const [draftHeight, setDraftHeight] = useState("");
-  const [draftEmail, setDraftEmail] = useState("");
-
-  const openEdit = () => {
-    setDraftAge(age);
-    setDraftWeight(weight);
-    setDraftHeight(height);
-    setDraftEmail(email);
+  const startEditingProfile = () => {
+    if (!me) return;
+    setDraftEmail(me.email);
+    setDraftUsername(me.username);
     setEditOpen(true);
   };
 
-  const saveProfile = () => {
-    setAge(draftAge);
-    setWeight(draftWeight);
-    setHeight(draftHeight);
-    setEmail(draftEmail);
+  const cancelEditingProfile = () => {
+    if (!me) return;
+    setDraftEmail(me.email);
+    setDraftUsername(me.username);
     setEditOpen(false);
+  };
+
+  const saveProfile = async () => {
+    if (!me) return;
+    const fields: { email?: string; username?: string } = {};
+    if (draftEmail.trim() && draftEmail.trim() !== me.email) {
+      fields.email = draftEmail.trim();
+    }
+    if (draftUsername.trim() && draftUsername.trim() !== me.username) {
+      fields.username = draftUsername.trim();
+    }
+    if (Object.keys(fields).length === 0) {
+      setEditOpen(false);
+      return;
+    }
+    try {
+      setSavingProfile(true);
+      const updated = await authApi.updateMe(fields);
+      setMe({ email: updated.email, username: updated.username });
+      setDraftEmail(updated.email);
+      setDraftUsername(updated.username);
+      setEditOpen(false);
+    } catch (e: any) {
+      Alert.alert("Profile Update Failed", e?.message ?? "Could not update profile.");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -146,8 +183,8 @@ export default function Profile() {
 
           <Text style={styles.headerTitle}>Profile</Text>
 
-          <TouchableOpacity style={styles.headerBtn} onPress={openEdit}>
-            <Text style={styles.editIcon}>✎</Text>
+          <TouchableOpacity style={styles.headerBtn} onPress={startEditingProfile}>
+            <Text style={styles.headerEdit}>Edit</Text>
           </TouchableOpacity>
         </View>
 
@@ -160,30 +197,11 @@ export default function Profile() {
               </View>
 
               <View style={styles.profileInfo}>
-                <Text style={styles.userName}>User</Text>
-                <Text style={styles.userSub}>Created 0 days ago</Text>
+                <Text style={styles.userName}>{me?.username || "User"}</Text>
+                <Text style={styles.userSub}>{me?.email || "user@example.com"}</Text>
               </View>
             </View>
 
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statIcon}>🎂</Text>
-                <Text style={styles.statLabel}>Age</Text>
-                <Text style={styles.statValue}>{age ? `${age}` : "--"}</Text>
-              </View>
-
-              <View style={styles.statBox}>
-                <Text style={styles.statIcon}>⚖️</Text>
-                <Text style={styles.statLabel}>Weight</Text>
-                <Text style={styles.statValue}>{weight ? `${weight} kg` : "--"}</Text>
-              </View>
-
-              <View style={styles.statBox}>
-                <Text style={styles.statIcon}>📏</Text>
-                <Text style={styles.statLabel}>Height</Text>
-                <Text style={styles.statValue}>{height ? `${height} cm` : "--"}</Text>
-              </View>
-            </View>
           </View>
 
           <Text style={styles.weeklyTitle}>Weekly Sets Summary</Text>
@@ -275,57 +293,43 @@ export default function Profile() {
           <View style={{ height: 30 }} />
         </ScrollView>
 
-        
         <Modal transparent visible={editOpen} animationType="fade">
-          <Pressable style={styles.modalOverlay} onPress={() => setEditOpen(false)}>
+          <Pressable style={styles.modalOverlay} onPress={cancelEditingProfile}>
             <Pressable style={styles.modalCard} onPress={() => {}}>
               <View style={styles.modalTop}>
-                <Text style={styles.modalTitle}>Edit profile</Text>
-                <TouchableOpacity onPress={() => setEditOpen(false)}>
-                  <Text style={styles.modalClose}>✕</Text>
+                <Text style={styles.modalTitle}>Edit Profile</Text>
+                <TouchableOpacity onPress={cancelEditingProfile}>
+                  <Text style={styles.modalClose}>X</Text>
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.inputLabel}>Age</Text>
+              <Text style={styles.inputLabel}>Username</Text>
               <TextInput
+                value={draftUsername}
+                onChangeText={setDraftUsername}
+                autoCapitalize="none"
                 style={styles.input}
-                value={draftAge}
-                onChangeText={setDraftAge}
-                placeholder="Enter age"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.inputLabel}>Weight</Text>
-              <TextInput
-                style={styles.input}
-                value={draftWeight}
-                onChangeText={setDraftWeight}
-                placeholder="Enter weight"
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.inputLabel}>Height</Text>
-              <TextInput
-                style={styles.input}
-                value={draftHeight}
-                onChangeText={setDraftHeight}
-                placeholder="Enter height"
-                keyboardType="numeric"
+                placeholder="Username"
               />
 
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
-                style={styles.input}
                 value={draftEmail}
                 onChangeText={setDraftEmail}
-                placeholder="Enter email"
-                keyboardType="email-address"
                 autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+                placeholder="Email"
               />
 
-              <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} activeOpacity={0.85}>
-                <Text style={styles.saveBtnText}>Save</Text>
-              </TouchableOpacity>
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={cancelEditingProfile} disabled={savingProfile}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} disabled={savingProfile}>
+                  <Text style={styles.saveBtnText}>{savingProfile ? "Saving..." : "Save"}</Text>
+                </TouchableOpacity>
+              </View>
             </Pressable>
           </Pressable>
         </Modal>
@@ -357,13 +361,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerEdit: {
+    fontSize: 12,
+    color: "#0b1220",
+    fontWeight: "800",
+  },
   backArrow: {
     fontSize: 24,
-    color: "#111827",
-    fontWeight: "700",
-  },
-  editIcon: {
-    fontSize: 20,
     color: "#111827",
     fontWeight: "700",
   },
@@ -419,36 +423,77 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  statsRow: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "center",
+    padding: 18,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 18,
+  },
+  modalTop: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 14,
-  },
-  statBox: {
-    width: "48%",
-    backgroundColor: "#f6f7fb",
-    borderRadius: 14,
-    paddingVertical: 10,
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
-  statIcon: {
-    fontSize: 15,
-    marginBottom: 4,
-  },
-  statLabel: {
-    color: "#7a889c",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  statValue: {
-    marginTop: 5,
-    fontSize: 16,
+  modalTitle: {
+    fontSize: 18,
     fontWeight: "900",
     color: "#0b1220",
   },
-
+  modalClose: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  inputLabel: {
+    marginTop: 8,
+    marginBottom: 6,
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0b1220",
+  },
+  input: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#111827",
+  },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  cancelBtn: {
+    flex: 1,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 12,
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  cancelBtnText: {
+    color: "#111827",
+    fontWeight: "800",
+  },
+  saveBtn: {
+    flex: 1,
+    backgroundColor: "#1e88e5",
+    borderRadius: 12,
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  saveBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
   weeklyTitle: {
     fontSize: 18,
     fontWeight: "900",
@@ -518,65 +563,6 @@ const styles = StyleSheet.create({
   },
   deleteText: {
     color: "#ef4444",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "center",
-    padding: 18,
-  },
-  modalCard: {
-    backgroundColor: "#fff",
-    borderRadius: 22,
-    padding: 18,
-  },
-  modalTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#0b1220",
-  },
-  modalClose: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#111827",
-  },
-
-  inputLabel: {
-    marginTop: 8,
-    marginBottom: 6,
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#0b1220",
-  },
-  input: {
-    backgroundColor: "#f6f7fb",
-    borderWidth: 1,
-    borderColor: "#e6ebf2",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#111827",
-  },
-
-  saveBtn: {
-    marginTop: 18,
-    backgroundColor: "#0b1220",
-    borderRadius: 16,
-    paddingVertical: 15,
-    alignItems: "center",
-  },
-  saveBtnText: {
-    color: "#fff",
     fontSize: 16,
     fontWeight: "900",
   },

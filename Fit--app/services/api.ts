@@ -199,6 +199,23 @@ export type WorkoutHistoryItem = {
   logged_at: string;
 };
 
+export type GlobalTemplate = {
+  id: string;
+  name: string;
+  target_muscle: string;
+  exercises: Array<{ id: string; name: string; muscle: string }>;
+  created_at?: string | null;
+};
+
+export type AdminUserItem = {
+  id: string;
+  email: string;
+  username: string;
+  role: string;
+  created_at?: string | null;
+  password_hash?: string | null;
+};
+
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
 const AUTH_BOOTSTRAP_PATHS = new Set([
@@ -315,7 +332,7 @@ export const authApi = {
 
   getMe: () => request<AuthUser>("/auth/me"),
 
-  updateMe: (fields: { username?: string; password?: string }) =>
+  updateMe: (fields: { email?: string; username?: string; password?: string }) =>
     request<AuthUser>("/auth/me", {
       method: "PUT",
       body: JSON.stringify(fields),
@@ -372,4 +389,33 @@ export const workoutApi = {
     }),
 
   getHistory: () => request<WorkoutHistoryItem[]>("/workouts/history"),
+};
+
+export const globalTemplatesApi = {
+  getAll: () => request<GlobalTemplate[]>("/workouts/global-templates"),
+
+  create: (payload: {
+    name: string;
+    target_muscle: string;
+    exercises: Array<{ id: string; name: string; muscle: string }>;
+  }) =>
+    request<GlobalTemplate>("/workouts/global-templates", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  delete: (templateId: string) =>
+    request<void>(`/workouts/global-templates/${templateId}`, {
+      method: "DELETE",
+    }),
+};
+
+export const adminApi = {
+  getUsers: () => request<AdminUserItem[]>("/auth/admin/users"),
+
+  updateUser: (userId: string, fields: { email?: string; username?: string }) =>
+    request<AdminUserItem>(`/auth/admin/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
 };

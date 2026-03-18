@@ -19,7 +19,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
   key: string;
   name: string;
-  params?: { existingExercises?: ExerciseItem[] };
+  params?: { existingExercises?: ExerciseItem[]; returnTo?: string; title?: string; targetMuscle?: string };
 };
 
 type ExerciseCatalogItem = ExerciseItem & {
@@ -42,6 +42,7 @@ const DEFAULT_MUSCLE_OPTIONS = [
 export default function AddExercise() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+  const isTemplateEditMode = route.params?.returnTo === "AddWorkoutTemplate";
 
   const [query, setQuery] = useState("");
   const [exercises, setExercises] = useState<ExerciseCatalogItem[]>([]);
@@ -98,7 +99,15 @@ export default function AddExercise() {
   }, []);
 
   
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    isTemplateEditMode ? new Set(existingIds) : new Set()
+  );
+
+  useEffect(() => {
+    if (isTemplateEditMode) {
+      setSelectedIds(new Set(existingIds));
+    }
+  }, [isTemplateEditMode, existingIds]);
 
   const data = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -130,9 +139,6 @@ export default function AddExercise() {
   }, [query, muscleFilter, equipment, exercises]);
 
   const toggleSelect = (id: string) => {
-    
-    if (existingIds.has(id)) return;
-
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -142,29 +148,45 @@ export default function AddExercise() {
   };
 
   const selectedCount = selectedIds.size;
+  const hasSelectionChanged = useMemo(() => {
+    if (!isTemplateEditMode) {
+      return selectedIds.size > 0;
+    }
+    if (selectedIds.size !== existingIds.size) {
+      return true;
+    }
+    for (const id of selectedIds) {
+      if (!existingIds.has(id)) {
+        return true;
+      }
+    }
+    return false;
+  }, [isTemplateEditMode, selectedIds, existingIds]);
 
   const addSelectedToWorkout = () => {
-    const newExercises: ExerciseItem[] = exercises
+    const selectedExercises: ExerciseItem[] = exercises
       .filter((e) => selectedIds.has(e.id))
       .map(({ id, name, muscle }) => ({ id, name, muscle }));
 
-    const mergedById = new Map<string, ExerciseItem>();
-    for (const ex of existingExercises) {
-      mergedById.set(ex.id, ex);
+    const returnTo = route.params?.returnTo;
+    if (returnTo === "AddWorkoutTemplate") {
+      navigation.navigate({
+        name: "AddWorkoutTemplate" as never,
+        params: {
+          selectedExercises,
+          title: route.params?.title,
+          targetMuscle: route.params?.targetMuscle,
+        } as never,
+        merge: true,
+      } as never);
+    } else {
+      navigation.navigate({
+        name: "LogWorkout" as never,
+        params: { selectedExercises } as never,
+        merge: true,
+      } as never);
     }
-    for (const ex of newExercises) {
-      mergedById.set(ex.id, ex);
-    }
-    const selectedExercises = Array.from(mergedById.values());
 
-    
-    navigation.navigate({
-      name: "LogWorkout" as never,
-      params: { selectedExercises } as never,
-      merge: true,
-    } as never);
-
-   
     setSelectedIds(new Set());
   };
 
@@ -220,7 +242,6 @@ export default function AddExercise() {
           }}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
-            const alreadyAdded = existingIds.has(item.id);
             const isSelected = selectedIds.has(item.id);
 
             return (
@@ -228,10 +249,9 @@ export default function AddExercise() {
                 style={[
                   styles.row,
                   isSelected && styles.rowSelected,
-                  alreadyAdded && styles.rowDisabled,
                 ]}
                 onPress={() => toggleSelect(item.id)}
-                activeOpacity={alreadyAdded ? 1 : 0.85}
+                activeOpacity={0.85}
               >
                 {isSelected ? (
                   <View style={styles.selectedBar} />
@@ -244,7 +264,7 @@ export default function AddExercise() {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, alreadyAdded && { color: "#9aa3af" }]}>
+                  <Text style={styles.rowTitle}>
                     {item.name}
                   </Text>
                   <Text style={styles.rowSub}>{item.muscle} · {item.equipment}</Text>
@@ -254,10 +274,9 @@ export default function AddExercise() {
                   style={[
                     styles.rightIcon,
                     isSelected && styles.rightIconSelected,
-                    alreadyAdded && styles.rightIconAlreadyAdded,
                   ]}
                 >
-                  {(alreadyAdded || isSelected) ? (
+                  {isSelected ? (
                     <Text
                       style={[
                         styles.rightIconCheck,
@@ -274,7 +293,7 @@ export default function AddExercise() {
         />
 
         {/* Bottom blue button */}
-        {selectedCount > 0 && (
+        {hasSelectionChanged && (
           <View style={styles.bottomBarWrap}>
             <TouchableOpacity
               style={styles.bottomBarBtn}
@@ -282,7 +301,9 @@ export default function AddExercise() {
               activeOpacity={0.9}
             >
               <Text style={styles.bottomBarText}>
-                Add {selectedCount} {selectedCount === 1 ? "exercise" : "exercises"}
+                {isTemplateEditMode
+                  ? `Save selection (${selectedCount})`
+                  : `Add ${selectedCount} ${selectedCount === 1 ? "exercise" : "exercises"}`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -405,8 +426,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   rowSelected: { backgroundColor: "#fbfdff" },
-  rowDisabled: { opacity: 0.6 },
-
   selectedBar: {
     width: 6,
     height: 54,
@@ -448,9 +467,6 @@ const styles = StyleSheet.create({
   rightIconSelected: {
     backgroundColor: "#1e88e5",
     borderColor: "#1e88e5",
-  },
-  rightIconAlreadyAdded: {
-    borderColor: "#9aa3af",
   },
   rightIconCheck: {
     fontSize: 18,

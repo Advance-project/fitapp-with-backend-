@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import database
-from ..auth_utils import get_current_user
+from ..auth_utils import get_current_user, require_admin
 from ..models import (
+    GlobalWorkoutTemplateResponse,
+    SaveGlobalTemplateRequest,
     SaveLoggedWorkoutRequest,
     SaveTemplateRequest,
     WorkoutHistoryResponse,
@@ -85,3 +87,38 @@ async def delete_template(template_id: str, current_user: dict = Depends(get_cur
 async def get_history(current_user: dict = Depends(get_current_user)):
     docs = await database.get_workout_history(current_user["id"])
     return [WorkoutHistoryResponse(**doc) for doc in docs]
+
+
+@router.get("/global-templates", response_model=list[GlobalWorkoutTemplateResponse])
+async def get_global_templates(current_user: dict = Depends(get_current_user)):
+    docs = await database.get_global_templates()
+    return [GlobalWorkoutTemplateResponse(**doc) for doc in docs]
+
+
+@router.post("/global-templates", response_model=GlobalWorkoutTemplateResponse, status_code=status.HTTP_201_CREATED)
+async def create_global_template(
+    payload: SaveGlobalTemplateRequest,
+    current_user: dict = Depends(require_admin),
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Template name is required",
+        )
+    saved = await database.save_global_template(
+        name=name,
+        target_muscle=payload.target_muscle,
+        exercises=[ex.model_dump() for ex in payload.exercises],
+    )
+    return GlobalWorkoutTemplateResponse(**saved)
+
+
+@router.delete("/global-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_global_template(
+    template_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    deleted = await database.delete_global_template(template_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")

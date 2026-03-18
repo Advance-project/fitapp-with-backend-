@@ -50,6 +50,10 @@ def _workout_history():
     return _db["workout_history"]
 
 
+def _global_workout_templates():
+    return _db["global_workout_templates"]
+
+
 def _clean(doc: dict) -> dict:
     """Remove MongoDB internal _id before returning to callers."""
     doc.pop("_id", None)
@@ -78,6 +82,7 @@ async def create_user(email: str, username: str, password_hash: str) -> dict:
         "username": username,
         "password_hash": password_hash,
         "role": "user",
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await _users().insert_one(user)
     return _clean(user)
@@ -95,6 +100,12 @@ async def update_user(user_id: str, fields: dict) -> Optional[dict]:
 async def delete_user(user_id: str) -> bool:
     result = await _users().delete_one({"id": user_id})
     return result.deleted_count > 0
+
+
+async def get_all_users() -> list[dict]:
+    """Return all users (including password_hash) for admin, sorted by username."""
+    docs = await _users().find({}, {"_id": 0}).sort("username", 1).to_list(length=None)
+    return docs
 
 
 async def seed_admin(email: str, username: str, password_hash: str) -> None:
@@ -129,6 +140,8 @@ async def ensure_indexes() -> None:
     await _workout_templates().create_index("updated_at")
     await _workout_history().create_index("user_id")
     await _workout_history().create_index("logged_at")
+    await _global_workout_templates().create_index("id", unique=True)
+    await _global_workout_templates().create_index("created_at")
 
 
 async def _seed_option_collection(collection, values: list[str]) -> None:
@@ -361,13 +374,7 @@ async def clear_log_workout_draft(user_id: str) -> bool:
 
 def _history_cutoff_utc(now: Optional[datetime] = None) -> datetime:
     current = now or datetime.now(timezone.utc)
-    start_of_week = (current - timedelta(days=current.weekday())).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    return start_of_week - timedelta(days=7)
+    return current - timedelta(days=30)
 
 
 async def prune_workout_history(user_id: str) -> None:
@@ -433,6 +440,32 @@ async def get_workout_templates(user_id: str) -> list[dict]:
 
 async def delete_workout_template(user_id: str, template_id: str) -> bool:
     result = await _workout_templates().delete_one({"user_id": user_id, "id": template_id})
+    return result.deleted_count > 0
+
+
+async def save_global_template(name: str, target_muscle: str, exercises: list[dict]) -> dict:
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "target_muscle": target_muscle,
+        "exercises": exercises,
+        "created_at": now,
+    }
+    await _global_workout_templates().insert_one(doc)
+    return _clean(doc)
+
+
+async def get_global_templates() -> list[dict]:
+    docs = await _global_workout_templates().find(
+        {},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(length=None)
+    return docs
+
+
+async def delete_global_template(template_id: str) -> bool:
+    result = await _global_workout_templates().delete_one({"id": template_id})
     return result.deleted_count > 0
 
 

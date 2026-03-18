@@ -13,6 +13,21 @@ import type { RootStackParamList } from "../App";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Program">;
 
+function shortTargetMuscle(label: string): string {
+  const map: Record<string, string> = {
+    "Chest": "C",
+    "Back": "B",
+    "Shoulder": "S",
+    "Bicep / Back": "Bi/B",
+    "Chest / Tricep": "C/Tri",
+    "Shoulder / Abs": "S/Abs",
+    "Chest / Back / Shoulder / Bicep / Tricep": "UB (C/B/S/Bi/Tri)",
+    "Chest / Shoulder / Tricep": "Push (C/S/Tri)",
+    "Back / Bicep / Shoulder": "Pull (B/Bi/S)",
+  };
+  return map[label] ?? label;
+}
+
 type Route = {
   key: string;
   name: string;
@@ -21,6 +36,8 @@ type Route = {
     viewOnly?: boolean;
     title?: string;
     subtitle?: string;
+    targetMuscle?: string;
+    exercises?: Array<{ id: string; name: string; muscle: string }>;
   };
 };
 
@@ -28,11 +45,9 @@ export default function Program() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
 
-  const programId = route.params?.programId ?? "";
-  const viewOnly = route.params?.viewOnly === true;
-
-  const title = route.params?.title ?? "Chest";
-  const subtitle = route.params?.subtitle ?? "2";
+  const title = route.params?.title ?? "Program";
+  const exercises = route.params?.exercises ?? [];
+  const coverLabel = shortTargetMuscle(route.params?.targetMuscle ?? title);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -50,36 +65,35 @@ export default function Program() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.coverWrap}>
             <View style={styles.coverThumb}>
-              <Text style={styles.coverThumbText}>{title}</Text>
+              <Text style={styles.coverThumbText} numberOfLines={1} ellipsizeMode="tail">
+                {coverLabel}
+              </Text>
             </View>
 
             <Text style={styles.programName}>{title}</Text>
 
-            <Text style={styles.routineCount}>{subtitle} exercise</Text>
+            <Text style={styles.routineCount}>
+              {exercises.length} {exercises.length === 1 ? "exercise" : "exercises"}
+            </Text>
           </View>
 
-          <Text style={styles.section}>Routines</Text>
-
           <View style={styles.routineBlock}>
-            <View style={styles.routineTop}>
-              <Text style={styles.routineTitle}>{title}</Text>
-            </View>
+            {exercises.length === 0 ? (
+              <Text style={styles.exerciseSub}>No exercises added.</Text>
+            ) : (
+              exercises.map((ex) => (
+                <View key={ex.id} style={styles.exerciseRow}>
+                  <View style={styles.exerciseIcon}>
+                    <Text style={{ fontSize: 18 }}>🏋️</Text>
+                  </View>
 
-            {[
-              "Bench Press (Barbell)",
-              "Incline Dumbbell Press",
-            ].map((x) => (
-              <View key={x} style={styles.exerciseRow}>
-                <View style={styles.exerciseIcon}>
-                  <Text style={{ fontSize: 18 }}>🏋️</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.exerciseNameBlue}>{ex.name}</Text>
+                    <Text style={styles.exerciseSub}>{ex.muscle}</Text>
+                  </View>
                 </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.exerciseNameBlue}>{x}</Text>
-                  <Text style={styles.exerciseSub}>3 sets · 12–15 reps</Text>
-                </View>
-              </View>
-            ))}
+              ))
+            )}
           </View>
 
           <View style={{ height: 30 }} />
@@ -118,20 +132,21 @@ const styles = StyleSheet.create({
   coverWrap: { paddingBottom: 10 },
 
   coverThumb: {
-    width: 150,
-    height: 120,
-    borderRadius: 18,
+    width: 160,
+    height: 90,
+    borderRadius: 14,
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
+    paddingHorizontal: 10,
   },
 
   coverThumbText: {
     fontWeight: "900",
     color: "#1e88e5",
     textAlign: "center",
-    fontSize: 18,
+    fontSize: 13,
   },
 
   programName: {
@@ -141,36 +156,17 @@ const styles = StyleSheet.create({
   },
 
   routineCount: {
-    marginTop: 12,
-    fontSize: 18,
-    color: "#111827",
-    fontWeight: "800",
-  },
-
-  section: {
-    marginTop: 18,
+    marginTop: 10,
     fontSize: 18,
     fontWeight: "800",
-    color: "#9aa3af",
+    color: "#6b7280",
   },
 
   routineBlock: {
-    marginTop: 18,
-    paddingTop: 10,
+    marginTop: 24,
+    paddingTop: 4,
     borderTopWidth: 1,
     borderTopColor: "#eef2f7",
-  },
-
-  routineTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  routineTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#0b1220",
   },
 
   exerciseRow: {
