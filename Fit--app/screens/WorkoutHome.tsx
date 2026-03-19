@@ -137,7 +137,7 @@ export default function WorkoutHome() {
               style={styles.cardSmall}
               onPress={() => navigation.navigate("ChatRoutine")}
             >
-              <Text style={styles.cardText}>Create routine{"\n"}using ChatGPT</Text>
+              <Text style={styles.cardText}>Create routine{"\n"}with assistant</Text>
             </TouchableOpacity>
 
             <View style={styles.cardSmallGhost} />

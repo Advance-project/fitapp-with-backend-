@@ -55,7 +55,7 @@ export default function ChatRoutine() {
       id: `a_${Date.now() + 1}`,
       role: "assistant",
       text:
-        "Got it ✅\nExample routine:\n• Day 1: Push\n• Day 2: Pull\n• Day 3: Legs\n\n(When your FastAPI is ready, I will generate real routines from ChatGPT.)",
+        "Got it. Example split:\n• Day 1: Push\n• Day 2: Pull\n• Day 3: Legs\n\nWhen the backend is connected, this will return personalized routines.",
       createdAt: Date.now() + 1,
     };
 
@@ -76,7 +76,7 @@ export default function ChatRoutine() {
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
 
-          <Text style={styles.headerTitle}>ChatGPT Routine</Text>
+          <Text style={styles.headerTitle}>Routine Assistant</Text>
 
           <View style={styles.headerRight} />
         </View>

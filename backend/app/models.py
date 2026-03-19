@@ -100,6 +100,15 @@ class AdminUpdateUserRequest(BaseModel):
     username: Optional[str] = None
 
 
+class AdminUserGrowthStatsResponse(BaseModel):
+    total_users: int
+    new_users_this_week: int
+    new_users_last_week: int
+    weekly_change: int
+    weekly_signups_last_week: list[int]
+    weekly_signups_this_week: list[int]
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

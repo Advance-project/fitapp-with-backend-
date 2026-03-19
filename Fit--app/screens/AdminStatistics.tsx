@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -6,23 +6,17 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { BarChart } from "react-native-chart-kit";
 import { isAdminAuthenticated } from "./userStore";
+import { adminApi, AdminUserGrowthStats } from "../services/api";
 
 const screenWidth = Dimensions.get("window").width;
 const CHART_WIDTH = screenWidth - 56;
 const DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-
-type StatsResponse = {
-  totalUsers: number;
-  newUsersThisWeek: number;
-  newUsersLastWeek: number;
-  weeklySignupsLastWeek: number[];
-  weeklySignupsThisWeek: number[];
-};
 
 function getYAxisSegments(values: number[]): number {
   // Keep Y-axis tick distance at exactly 1 unit: 0,1,2,3...
@@ -31,24 +25,53 @@ function getYAxisSegments(values: number[]): number {
 
 export default function AdminStatistics() {
   const navigation = useNavigation<any>();
+  const [stats, setStats] = useState<AdminUserGrowthStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await adminApi.getUserGrowthStats();
+      setStats(data);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load statistics");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAdminAuthenticated()) {
       navigation.replace("AdminLogin");
+      return;
     }
-  }, [navigation]);
+    loadStats();
+  }, [navigation, loadStats]);
 
-  const stats: StatsResponse = {
-    totalUsers: 128,
-    newUsersThisWeek: 14,
-    newUsersLastWeek: 9,
-    weeklySignupsLastWeek: [1, 2, 1, 1, 2, 1, 1],
-    weeklySignupsThisWeek: [1, 2, 2, 1, 3, 2, 3],
-  };
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAdminAuthenticated()) {
+        return;
+      }
+      loadStats();
+    }, [loadStats])
+  );
+
+  const resolvedStats: AdminUserGrowthStats =
+    stats ?? {
+      total_users: 0,
+      new_users_this_week: 0,
+      new_users_last_week: 0,
+      weekly_change: 0,
+      weekly_signups_last_week: [0, 0, 0, 0, 0, 0, 0],
+      weekly_signups_this_week: [0, 0, 0, 0, 0, 0, 0],
+    };
 
   const growthDiff = useMemo(() => {
-    return stats.newUsersThisWeek - stats.newUsersLastWeek;
-  }, [stats]);
+    return resolvedStats.weekly_change;
+  }, [resolvedStats]);
 
   const chartConfig = {
     backgroundGradientFrom: "#ffffff",
@@ -89,22 +112,34 @@ export default function AdminStatistics() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.pageTitle}>Growth overview</Text>
 
+          {loading && !stats && (
+            <View style={styles.feedbackRow}>
+              <ActivityIndicator color="#1e88e5" />
+            </View>
+          )}
+
+          {!loading && error && (
+            <View style={styles.feedbackRow}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
           <View style={styles.row}>
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Total users</Text>
-              <Text style={styles.statValue}>{stats.totalUsers}</Text>
+              <Text style={styles.statValue}>{resolvedStats.total_users}</Text>
             </View>
 
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>This week</Text>
-              <Text style={styles.statValue}>{stats.newUsersThisWeek}</Text>
+              <Text style={styles.statValue}>{resolvedStats.new_users_this_week}</Text>
             </View>
           </View>
 
           <View style={styles.row}>
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Last week</Text>
-              <Text style={styles.statValue}>{stats.newUsersLastWeek}</Text>
+              <Text style={styles.statValue}>{resolvedStats.new_users_last_week}</Text>
             </View>
 
             <View style={styles.statCard}>
@@ -122,7 +157,7 @@ export default function AdminStatistics() {
                 labels: DAY_LABELS,
                 datasets: [
                   {
-                    data: stats.weeklySignupsLastWeek,
+                    data: resolvedStats.weekly_signups_last_week,
                   },
                 ],
               }}
@@ -132,7 +167,7 @@ export default function AdminStatistics() {
               yAxisSuffix=""
               chartConfig={chartConfig}
               fromZero
-              segments={getYAxisSegments(stats.weeklySignupsLastWeek)}
+              segments={getYAxisSegments(resolvedStats.weekly_signups_last_week)}
               withInnerLines
               showValuesOnTopOfBars
               style={styles.chart}
@@ -146,7 +181,7 @@ export default function AdminStatistics() {
                 labels: DAY_LABELS,
                 datasets: [
                   {
-                    data: stats.weeklySignupsThisWeek,
+                    data: resolvedStats.weekly_signups_this_week,
                   },
                 ],
               }}
@@ -154,7 +189,7 @@ export default function AdminStatistics() {
               height={220}
               yAxisLabel=""
               yAxisSuffix=""
-              segments={getYAxisSegments(stats.weeklySignupsThisWeek)}
+              segments={getYAxisSegments(resolvedStats.weekly_signups_this_week)}
               chartConfig={chartConfig}
               fromZero
               withInnerLines
@@ -199,6 +234,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 20,
+  },
+
+  feedbackRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+  },
+
+  errorText: {
+    color: "#e53935",
+    fontWeight: "700",
   },
 
   pageTitle: {

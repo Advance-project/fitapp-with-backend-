@@ -19,6 +19,7 @@ from ..models import (
     AdminUpdateUserRequest,
     UserResponse,
     AdminUserResponse,
+    AdminUserGrowthStatsResponse,
     TokenResponse,
     RefreshResponse,
 )
@@ -213,6 +214,17 @@ async def delete_me(current_user: dict = Depends(get_current_user)):
 )
 async def admin_list_users(admin: dict = Depends(require_admin)):
     return await database.get_all_users()
+
+
+# ── GET /auth/admin/statistics ───────────────────────────────────────────────
+
+@router.get(
+    "/admin/statistics",
+    response_model=AdminUserGrowthStatsResponse,
+    summary="[Admin] User growth statistics for this and last week",
+)
+async def admin_user_growth_statistics(admin: dict = Depends(require_admin)):
+    return await database.get_admin_user_growth_stats()
 
 
 # ── PATCH /auth/admin/users/{user_id} ─────────────────────────────────────────

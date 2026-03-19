@@ -203,6 +203,15 @@ export type WorkoutHistoryItem = {
   logged_at: string;
 };
 
+export type LastPerformanceSets = {
+  [exerciseId: string]: Array<{
+    kg?: number;
+    reps?: number;
+    intensity?: number;
+    time_minutes?: number;
+  }>;
+};
+
 export type GlobalTemplate = {
   id: string;
   name: string;
@@ -218,6 +227,15 @@ export type AdminUserItem = {
   role: string;
   created_at?: string | null;
   password_hash?: string | null;
+};
+
+export type AdminUserGrowthStats = {
+  total_users: number;
+  new_users_this_week: number;
+  new_users_last_week: number;
+  weekly_change: number;
+  weekly_signups_last_week: number[];
+  weekly_signups_this_week: number[];
 };
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
@@ -393,6 +411,9 @@ export const workoutApi = {
     }),
 
   getHistory: () => request<WorkoutHistoryItem[]>("/workouts/history"),
+
+  getLastPerformance: (exerciseIds: string[]) =>
+    request<LastPerformanceSets>(`/workouts/last-performance?exercise_ids=${exerciseIds.join(",")}`),
 };
 
 export const globalTemplatesApi = {
@@ -416,6 +437,9 @@ export const globalTemplatesApi = {
 
 export const adminApi = {
   getUsers: () => request<AdminUserItem[]>("/auth/admin/users"),
+
+  getUserGrowthStats: () =>
+    request<AdminUserGrowthStats>("/auth/admin/statistics"),
 
   updateUser: (userId: string, fields: { email?: string; username?: string }) =>
     request<AdminUserItem>(`/auth/admin/users/${userId}`, {

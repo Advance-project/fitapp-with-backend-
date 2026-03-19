@@ -13,7 +13,7 @@ const slides = [
   { title: "Keep track", text: "Keep track of each\nworkout and activity." },
   {
     title: "Smart plans",
-    text: "Use ChatGPT for generating\nworkout plans according\nto your convenience.",
+    text: "Use the routine assistant\nto build workout plans\nthat fit your schedule.",
   },
 ];
 

@@ -18,7 +18,7 @@ import type {
   ExerciseItem,
   WorkoutExercise,
 } from "../App";
-import { logWorkoutApi, workoutApi } from "../services/api";
+import { logWorkoutApi, workoutApi, LastPerformanceSets } from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
@@ -144,6 +144,7 @@ export default function LogWorkout() {
   const [menuExerciseId, setMenuExerciseId] = useState<string | null>(null);
   const [pendingRemoveExerciseId, setPendingRemoveExerciseId] = useState<string | null>(null);
   const [draftReady, setDraftReady] = useState(false);
+  const [prevPerformance, setPrevPerformance] = useState<LastPerformanceSets>({});
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -288,6 +289,15 @@ export default function LogWorkout() {
       }
     };
   }, [workoutExercises, draftReady]);
+
+  useEffect(() => {
+    if (!isLogMode || workoutExercises.length === 0) return;
+    const sig = workoutExercises.map((ex) => ex.id).join(",");
+    workoutApi
+      .getLastPerformance(sig.split(","))
+      .then(setPrevPerformance)
+      .catch(() => {});
+  }, [workoutExercises.map((ex) => ex.id).join(","), isLogMode]);
 
   const goBackToHome = () => navigation.navigate("WorkoutHome");
   const hasExercises = workoutExercises.length > 0;
@@ -793,6 +803,7 @@ export default function LogWorkout() {
                     <>
                       {(() => {
                         const cardio = isCardioExercise(ex.muscle);
+                        const prevSets = prevPerformance[ex.id] ?? [];
                         return (
                           <>
                       <View style={styles.tableHeader}>
@@ -814,7 +825,17 @@ export default function LogWorkout() {
                             <Text style={[styles.td, styles.colSet, styles.setNumberTouch]}>{set.id}</Text>
                           </View>
                           <Text style={[styles.td, styles.colPrevious, styles.previousValue]}>
-                            {cardio ? "- min" : "- kg"}
+                            {(() => {
+                              const prevSet = prevSets[parseInt(set.id, 10) - 1];
+                              if (cardio) {
+                                return prevSet?.time_minutes != null && prevSet.time_minutes > 0
+                                  ? `${prevSet.time_minutes} min`
+                                  : "- min";
+                              }
+                              return prevSet?.kg != null && prevSet.kg > 0
+                                ? `${prevSet.kg} kg`
+                                : "- kg";
+                            })()}
                           </Text>
 
                           {cardio ? (

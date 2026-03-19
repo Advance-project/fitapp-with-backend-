@@ -15,45 +15,78 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { deleteAccount } from "./userStore";
-import { authApi, clearToken } from "../services/api";
+import { authApi, clearToken, workoutApi, WorkoutHistoryItem } from "../services/api";
 import { BarChart } from "react-native-chart-kit";
-
-const MUSCLE_GROUPS = [
-  "Back",
-  "Biceps",
-  "Chest",
-  "Triceps",
-  "Shoulder",
-  "Abs",
-  "Legs",
-  "Cardio",
-] as const;
 
 const CHART_LABELS = ["Back", "Bcps", "Chst", "Tri", "Shld", "Abs", "Legs", "Crdo"];
 
-const WEEKLY_SUMMARY = [
-  {
-    title: "Last Week",
-    sets: [8, 6, 10, 5, 7, 4, 12, 3],
-  },
-  {
-    title: "Current Week",
-    sets: [6, 4, 8, 6, 5, 3, 9, 2],
-  },
-  {
-    title: "Upcoming Week",
-    sets: [7, 5, 9, 5, 6, 4, 10, 3],
-  },
-] as const;
+// Index matches CHART_LABELS order: Back Biceps Chest Triceps Shoulders Abs Legs Cardio
+const MUSCLE_PREFIX_MAP: [string, number][] = [
+  ["back", 0],
+  ["bicep", 1],
+  ["chest", 2],
+  ["tricep", 3],
+  ["shoulder", 4],
+  ["ab", 5],
+  ["core", 5],
+  ["leg", 6],
+  ["cardio", 7],
+];
 
-// Returns a segment count so Y-axis ticks land on round numbers
-function getChartSegments(sets: readonly number[]): number {
-  const max = Math.max(...sets);
-  if (max <= 5)  return 5;   // step = 1
-  if (max <= 10) return 5;   // step = 2
-  if (max <= 20) return 4;   // step = 5
-  if (max <= 50) return 5;   // step = 10
-  return 5;                  // step = max/5
+function muscleIndex(muscle: string): number {
+  const key = muscle.trim().toLowerCase();
+  for (const [prefix, idx] of MUSCLE_PREFIX_MAP) {
+    if (key.startsWith(prefix)) return idx;
+  }
+  return -1;
+}
+
+function parseHistoryDate(value: string): Date {
+  const hasZone = /([zZ]|[+-]\d{2}:\d{2})$/.test(value);
+  return new Date(hasZone ? value : `${value}Z`);
+}
+
+function mondayOf(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+function setsForWeek(history: WorkoutHistoryItem[], weekStart: Date): number[] {
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
+  const counts = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (const item of history) {
+    const d = parseHistoryDate(item.logged_at);
+    if (d >= weekStart && d < weekEnd) {
+      for (const ex of item.exercises) {
+        const idx = muscleIndex(ex.muscle);
+        if (idx >= 0) counts[idx] += ex.sets.length;
+      }
+    }
+  }
+  return counts;
+}
+
+type WeekSlide = { title: string; sets: number[] };
+
+const EMPTY_SETS = [0, 0, 0, 0, 0, 0, 0, 0];
+const DEFAULT_WEEKLY: WeekSlide[] = [
+  { title: "Last Week", sets: [...EMPTY_SETS] },
+  { title: "Current Week", sets: [...EMPTY_SETS] },
+  { title: "Upcoming Week", sets: [...EMPTY_SETS] },
+];
+
+function getChartSegments(sets: number[]): number {
+  const max = Math.max(...sets, 1);
+  if (max <= 5)  return 5;
+  if (max <= 10) return 5;
+  if (max <= 20) return 4;
+  if (max <= 50) return 5;
+  return 5;
 }
 
 export default function Profile() {
@@ -68,6 +101,7 @@ export default function Profile() {
   const [draftUsername, setDraftUsername] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [weeklySummary, setWeeklySummary] = useState<WeekSlide[]>(DEFAULT_WEEKLY);
   const weeklyScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -77,6 +111,7 @@ export default function Profile() {
 
   useEffect(() => {
     let mounted = true;
+
     authApi
       .getMe()
       .then((u) => {
@@ -85,9 +120,27 @@ export default function Profile() {
         setDraftEmail(u.email);
         setDraftUsername(u.username);
       })
-      .catch(() => {
-        // Keep profile usable even if /auth/me temporarily fails.
-      });
+      .catch(() => {});
+
+    workoutApi
+      .getHistory()
+      .then((history) => {
+        if (!mounted) return;
+        const now = new Date();
+        const thisMonday = mondayOf(now);
+        const lastMonday = new Date(thisMonday);
+        lastMonday.setUTCDate(lastMonday.getUTCDate() - 7);
+        const nextMonday = new Date(thisMonday);
+        nextMonday.setUTCDate(nextMonday.getUTCDate() + 7);
+
+        setWeeklySummary([
+          { title: "Last Week",     sets: setsForWeek(history, lastMonday) },
+          { title: "Current Week",  sets: setsForWeek(history, thisMonday) },
+          { title: "Upcoming Week", sets: setsForWeek(history, nextMonday) },
+        ]);
+      })
+      .catch(() => {});
+
     return () => {
       mounted = false;
     };
@@ -193,7 +246,9 @@ export default function Profile() {
           <View style={styles.profileCard}>
             <View style={styles.profileTop}>
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>U</Text>
+                <Text style={styles.avatarText}>
+                  {me?.username?.[0]?.toUpperCase() ?? "U"}
+                </Text>
               </View>
 
               <View style={styles.profileInfo}>
@@ -217,7 +272,7 @@ export default function Profile() {
               setWeeklyIndex(index);
             }}
           >
-            {WEEKLY_SUMMARY.map((week) => (
+            {weeklySummary.map((week) => (
               <View key={week.title} style={[styles.weeklyCard, { width: cardWidth }]}>
                 <Text style={styles.weeklyCardTitle}>{week.title}</Text>
                 <View
@@ -269,7 +324,7 @@ export default function Profile() {
           </ScrollView>
 
           <View style={styles.dotsRow}>
-            {WEEKLY_SUMMARY.map((_, i) => (
+            {weeklySummary.map((_, i) => (
               <View key={i} style={[styles.dot, i === weeklyIndex && styles.dotActive]} />
             ))}
           </View>

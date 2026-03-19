@@ -103,6 +103,17 @@ async def get_history(current_user: dict = Depends(get_current_user)):
     return [WorkoutHistoryResponse(**doc) for doc in docs]
 
 
+@router.get("/last-performance")
+async def get_last_performance(
+    exercise_ids: str,
+    current_user: dict = Depends(get_current_user),
+):
+    ids = [eid.strip() for eid in exercise_ids.split(",") if eid.strip()]
+    if not ids:
+        return {}
+    return await database.get_last_exercise_performance(current_user["id"], ids)
+
+
 @router.get("/global-templates", response_model=list[GlobalWorkoutTemplateResponse])
 async def get_global_templates(current_user: dict = Depends(get_current_user)):
     docs = await database.get_global_templates()

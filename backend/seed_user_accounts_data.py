@@ -1,5 +1,6 @@
 import asyncio
 import random
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,30 @@ from app.config import DB_NAME, MONGODB_URI
 
 TARGET_TEMPLATES_PER_USER = 7
 TARGET_HISTORY_PER_USER = 10
+
+
+USER_PROFILES: list[tuple[str, str]] = [
+    ("Aarav", "Sharma"),
+    ("Vivaan", "Patel"),
+    ("Aditya", "Singh"),
+    ("Arjun", "Gupta"),
+    ("Vihaan", "Kumar"),
+    ("Ishaan", "Mehta"),
+    ("Krishna", "Nair"),
+    ("Rohan", "Reddy"),
+    ("Saanvi", "Kaur"),
+    ("Aanya", "Iyer"),
+    ("Diya", "Joshi"),
+    ("Ananya", "Mishra"),
+    ("Myra", "Malhotra"),
+    ("Ira", "Chopra"),
+    ("Aisha", "Bose"),
+    ("Priya", "Verma"),
+    ("Kavya", "Jain"),
+    ("Nisha", "Agarwal"),
+    ("Rahul", "Saxena"),
+    ("Neha", "Bhat"),
+]
 
 
 @dataclass
@@ -126,6 +151,111 @@ def build_history_exercises(template_exercises: list[dict], rng: random.Random) 
     return history_exercises, total_sets, total_volume
 
 
+def random_created_at_last_two_weeks(rng: random.Random) -> str:
+    now = datetime.now(timezone.utc)
+    seconds_back = rng.randint(0, 14 * 24 * 60 * 60 - 1)
+    return (now - timedelta(seconds=seconds_back)).isoformat()
+
+
+def build_username(first_name: str, last_name: str, rng: random.Random) -> str:
+    return f"{first_name.lower()}{last_name.lower()}{rng.randint(10, 99)}"
+
+
+def first_name_from_email(email: str) -> str:
+    local_part = email.split("@", 1)[0].lower()
+    token = local_part.split(".", 1)[0]
+    cleaned = re.sub(r"[^a-z]", "", token)
+    return cleaned or "user"
+
+
+def build_seed_password(first_name: str) -> str:
+    normalized = first_name.strip().lower()
+    if not normalized:
+        normalized = "user"
+    return f"{normalized[:1].upper()}{normalized[1:]}@123"
+
+
+async def ensure_seed_users(users_col, rng: random.Random) -> int:
+    from app.auth_utils import hash_password
+
+    inserted = 0
+    for first_name, last_name in USER_PROFILES:
+        email = f"{first_name.lower()}.{last_name.lower()}@lakeheadu.ca"
+        password = build_seed_password(first_name)
+        existing = await users_col.find_one({"email": email}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+
+        username = build_username(first_name, last_name, rng)
+        while await users_col.find_one({"username": username}, {"_id": 0, "id": 1}):
+            username = build_username(first_name, last_name, rng)
+
+        await users_col.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "email": email,
+                "username": username,
+                "password_hash": hash_password(password),
+                "role": "user",
+                "created_at": random_created_at_last_two_weeks(rng),
+            }
+        )
+        inserted += 1
+
+    return inserted
+
+
+async def sync_lakeheadu_passwords(users_col) -> int:
+    from app.auth_utils import hash_password
+
+    users = await users_col.find(
+        {
+            "role": {"$ne": "admin"},
+            "email": {"$regex": "@lakeheadu\\.ca$", "$options": "i"},
+        },
+        {"_id": 0, "id": 1, "email": 1},
+    ).to_list(length=None)
+
+    updated = 0
+    for user in users:
+        first_name = first_name_from_email(user["email"])
+        target_hash = hash_password(build_seed_password(first_name))
+        result = await users_col.update_one(
+            {"id": user["id"]},
+            {"$set": {"password_hash": target_hash}},
+        )
+        if result.modified_count > 0:
+            updated += 1
+
+    return updated
+
+
+async def backfill_missing_created_at(users_col, rng: random.Random) -> int:
+    cursor = users_col.find(
+        {
+            "role": {"$ne": "admin"},
+            "$or": [
+                {"created_at": {"$exists": False}},
+                {"created_at": None},
+                {"created_at": ""},
+            ],
+        },
+        {"_id": 0, "id": 1},
+    )
+    users_without_created_at = await cursor.to_list(length=None)
+
+    updated = 0
+    for user in users_without_created_at:
+        result = await users_col.update_one(
+            {"id": user["id"]},
+            {"$set": {"created_at": random_created_at_last_two_weeks(rng)}},
+        )
+        if result.modified_count > 0:
+            updated += 1
+
+    return updated
+
+
 async def main() -> None:
     client = AsyncIOMotorClient(MONGODB_URI)
     db = client[DB_NAME]
@@ -134,6 +264,12 @@ async def main() -> None:
     exercises_col = db["exercises"]
     templates_col = db["workout_templates"]
     history_col = db["workout_history"]
+
+    rng = random.Random()
+
+    inserted_users = await ensure_seed_users(users_col, rng)
+    lakehead_passwords_updated = await sync_lakeheadu_passwords(users_col)
+    backfilled_created_at = await backfill_missing_created_at(users_col, rng)
 
     users = await users_col.find({"role": {"$ne": "admin"}}, {"_id": 0, "id": 1, "username": 1}).to_list(length=None)
     exercises = await exercises_col.find({}, {"_id": 0, "id": 1, "name": 1, "muscle": 1}).to_list(length=None)
@@ -210,9 +346,13 @@ async def main() -> None:
                 )
                 created_history += 1
 
-    print(f"Seed complete. Users touched: {len(users)}")
-    print(f"Templates created: {created_templates}")
-    print(f"History records created: {created_history}")
+    print(f"Seeding complete. Users processed: {len(users)}")
+    print(f"Users inserted: {inserted_users}")
+    print(f"Campus account passwords synced: {lakehead_passwords_updated}")
+    print(f"Users with created_at backfilled: {backfilled_created_at}")
+    print("Password format for campus users: <First-name>@123")
+    print(f"Templates added: {created_templates}")
+    print(f"History entries added: {created_history}")
 
     client.close()
 

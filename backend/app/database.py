@@ -108,6 +108,106 @@ async def get_all_users() -> list[dict]:
     return docs
 
 
+def _start_of_week_utc(now: Optional[datetime] = None) -> datetime:
+    current = now or datetime.now(timezone.utc)
+    midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight - timedelta(days=midnight.weekday())
+
+
+async def get_admin_user_growth_stats() -> dict:
+    this_week_start = _start_of_week_utc()
+    last_week_start = this_week_start - timedelta(days=7)
+    next_week_start = this_week_start + timedelta(days=7)
+
+    total_users = await _users().count_documents({"role": "user"})
+
+    pipeline = [
+        {
+            "$addFields": {
+                "created_at_date": {
+                    "$switch": {
+                        "branches": [
+                            {
+                                "case": {"$eq": [{"$type": "$created_at"}, "date"]},
+                                "then": "$created_at",
+                            },
+                            {
+                                "case": {"$eq": [{"$type": "$created_at"}, "string"]},
+                                "then": {
+                                    "$dateFromString": {
+                                        "dateString": "$created_at",
+                                        "onError": None,
+                                        "onNull": None,
+                                    }
+                                },
+                            },
+                        ],
+                        "default": None,
+                    }
+                }
+            }
+        },
+        {
+            "$match": {
+                "role": "user",
+                "created_at_date": {"$gte": last_week_start, "$lt": next_week_start},
+            }
+        },
+        {
+            "$project": {
+                "week": {
+                    "$cond": [
+                        {"$gte": ["$created_at_date", this_week_start]},
+                        "this",
+                        "last",
+                    ]
+                },
+                "day": {
+                    "$subtract": [
+                        {"$isoDayOfWeek": {"date": "$created_at_date", "timezone": "UTC"}},
+                        1,
+                    ]
+                },
+            }
+        },
+        {
+            "$group": {
+                "_id": {"week": "$week", "day": "$day"},
+                "count": {"$sum": 1},
+            }
+        },
+    ]
+
+    weekly_rows = await _users().aggregate(pipeline).to_list(length=None)
+
+    weekly_signups_last_week = [0] * 7
+    weekly_signups_this_week = [0] * 7
+    for row in weekly_rows:
+        week = row.get("_id", {}).get("week")
+        day = row.get("_id", {}).get("day")
+        count = int(row.get("count", 0))
+
+        if not isinstance(day, int) or day < 0 or day > 6:
+            continue
+
+        if week == "this":
+            weekly_signups_this_week[day] = count
+        elif week == "last":
+            weekly_signups_last_week[day] = count
+
+    new_users_this_week = sum(weekly_signups_this_week)
+    new_users_last_week = sum(weekly_signups_last_week)
+
+    return {
+        "total_users": total_users,
+        "new_users_this_week": new_users_this_week,
+        "new_users_last_week": new_users_last_week,
+        "weekly_change": new_users_this_week - new_users_last_week,
+        "weekly_signups_last_week": weekly_signups_last_week,
+        "weekly_signups_this_week": weekly_signups_this_week,
+    }
+
+
 async def seed_admin(email: str, username: str, password_hash: str) -> None:
     """Create the admin user if it doesn't already exist."""
     if await get_user_by_username(username):
@@ -486,3 +586,20 @@ async def get_workout_history(user_id: str) -> list[dict]:
         },
     ).sort("logged_at", -1).to_list(length=None)
     return docs
+
+
+async def get_last_exercise_performance(user_id: str, exercise_ids: list[str]) -> dict:
+    """Return the sets from the most recent logged workout for each requested exercise."""
+    result = {}
+    for ex_id in exercise_ids:
+        doc = await _workout_history().find_one(
+            {
+                "user_id": user_id,
+                "exercises": {"$elemMatch": {"id": ex_id}},
+            },
+            sort=[("logged_at", -1)],
+            projection={"_id": 0, "exercises.$": 1},
+        )
+        if doc and doc.get("exercises"):
+            result[ex_id] = doc["exercises"][0].get("sets", [])
+    return result
