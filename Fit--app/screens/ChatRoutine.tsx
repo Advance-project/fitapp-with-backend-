@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
+import { aiApi } from "../services/api";
 
 type Msg = {
   id: string;
@@ -32,13 +33,19 @@ export default function ChatRoutine() {
     },
   ]);
 
+  const [loadingAI, setLoadingAI] = useState(false);
+  const [error, setError] = useState("");
+
   const listRef = useRef<FlatList<Msg> | null>(null);
+  const canSend = useMemo(() => input.trim().length > 0 && !loadingAI, [input, loadingAI]);
 
-  const canSend = useMemo(() => input.trim().length > 0, [input]);
-
-  const send = () => {
+  const send = async () => {
     const text = input.trim();
     if (!text) return;
+
+    const history = messages
+      .slice(-6)
+      .map((message) => ({ role: message.role, content: message.text }));
 
     const userMsg: Msg = {
       id: `u_${Date.now()}`,
@@ -46,38 +53,51 @@ export default function ChatRoutine() {
       text,
       createdAt: Date.now(),
     };
-
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setError("");
+    setLoadingAI(true);
 
-    
-    const botMsg: Msg = {
-      id: `a_${Date.now() + 1}`,
-      role: "assistant",
-      text:
-        "Got it. Example split:\n• Day 1: Push\n• Day 2: Pull\n• Day 3: Legs\n\nWhen the backend is connected, this will return personalized routines.",
-      createdAt: Date.now() + 1,
-    };
+    try {
+      // Try AI response first
+      const response = await aiApi.routine(
+        text,
+        history,
+      );
 
-    setTimeout(() => {
+      const botMsg: Msg = {
+        id: `a_${Date.now()}`,
+        role: "assistant",
+        text: response.assistant,
+        createdAt: Date.now(),
+      };
       setMessages((prev) => [...prev, botMsg]);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-    }, 300);
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : "AI request failed.";
+      console.log("AI failed:", msg);
+      setError(msg);
 
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+      const botMsg: Msg = {
+        id: `a_${Date.now()}`,
+        role: "assistant",
+        text: "I could not fetch a GPT response right now. Please check your OpenAI quota/billing, then try again.",
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, botMsg]);
+    } finally {
+      setLoadingAI(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.screen}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerLeft}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
 
           <Text style={styles.headerTitle}>Routine Assistant</Text>
-
           <View style={styles.headerRight} />
         </View>
 
@@ -85,9 +105,15 @@ export default function ChatRoutine() {
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
+          {error !== "" && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
           <FlatList
             ref={(r) => {
-              listRef.current = r; 
+              listRef.current = r;
             }}
             data={messages}
             keyExtractor={(m) => m.id}
@@ -107,12 +133,11 @@ export default function ChatRoutine() {
             }}
           />
 
-          
           <View style={styles.inputRow}>
             <TextInput
               value={input}
               onChangeText={setInput}
-              placeholder="Type your request…"
+              placeholder="Type your request..."
               placeholderTextColor="#9aa3af"
               style={styles.input}
               multiline
@@ -124,7 +149,7 @@ export default function ChatRoutine() {
               style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
               disabled={!canSend}
             >
-              <Text style={styles.sendText}>Send</Text>
+              <Text style={styles.sendText}>{loadingAI ? "..." : "Send"}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -213,4 +238,19 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { opacity: 0.5 },
   sendText: { color: "#fff", fontSize: 16, fontWeight: "900" },
+
+  errorContainer: {
+    backgroundColor: "#fee2e2",
+    padding: 10,
+    marginHorizontal: 14,
+    marginTop: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: 14,
+    textAlign: "center",
+  },
 });

@@ -14,7 +14,7 @@ import Constants from "expo-constants";
 const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 const DEFAULT_WEB_BASE_URL = "http://127.0.0.1:8000";
 const ANDROID_EMULATOR_BASE_URL = "http://10.0.2.2:8000";
-const REQUEST_TIMEOUT_MS = 6000;
+const REQUEST_TIMEOUT_MS = 15000;
 let preferredAndroidBaseUrl: string | null = null;
 
 function getNativeBaseUrl(): string {
@@ -71,7 +71,10 @@ async function fetchWithAndroidFallback(
 ): Promise<Response> {
   const fetchWithTimeout = async (url: string) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      controller.abort(new Error("Request timed out"));
+    }, REQUEST_TIMEOUT_MS);
+
     try {
       return await fetch(url, { ...options, signal: controller.signal });
     } finally {
@@ -89,6 +92,7 @@ async function fetchWithAndroidFallback(
   for (let i = 0; i < baseUrls.length; i += 1) {
     const candidateUrl = `${baseUrls[i]}${path}`;
     try {
+      console.log("[API] Trying URL:", candidateUrl);
       if (i > 0) {
         console.log("[API] Retrying with:", candidateUrl);
       }
@@ -97,9 +101,9 @@ async function fetchWithAndroidFallback(
         preferredAndroidBaseUrl = baseUrls[i];
       }
       return response;
-    } catch (error) {
+    } catch (error: any) {
       lastError = error;
-      console.warn("[API] Fetch failed:", candidateUrl, error);
+      console.warn("[API] Fetch failed:", candidateUrl, error?.message || error);
     }
   }
 
@@ -150,6 +154,21 @@ export type LogWorkoutSetDraft = {
   intensity?: string;
   time_minutes?: string;
   done: boolean;
+};
+
+export type RoutineResponse = { assistant: string };
+
+export type RoutineHistoryItem = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export const aiApi = {
+  routine: (prompt: string, history: RoutineHistoryItem[] = []) =>
+    request<RoutineResponse>("/ai/routine", {
+      method: "POST",
+      body: JSON.stringify({ prompt, history }),
+    }),
 };
 
 export type LogWorkoutExerciseDraft = {
@@ -251,7 +270,7 @@ async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
   if (!refreshToken) return null;
 
-  const res = await fetch(`${BASE_URL}/auth/refresh`, {
+  const res = await fetchWithAndroidFallback("/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refreshToken }),
@@ -305,15 +324,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    // FastAPI returns { detail: "..." } for errors
-    const msg =
-      typeof data.detail === "string"
-        ? data.detail
-        : Array.isArray(data.detail)
-        ? data.detail.map((e: any) => e.msg).join(", ")
-        : "Something went wrong";
-    throw new Error(msg);
-  }
+  const msg =
+    data && typeof data.detail === "string"
+      ? data.detail
+      : data && Array.isArray(data.detail)
+      ? data.detail.map((e: any) => e.msg).join(", ")
+      : `Request failed with status ${res.status}`;
+
+  throw new Error(msg);
+}
   if (res.status === 204 || data === null) {
     return undefined as T;
   }

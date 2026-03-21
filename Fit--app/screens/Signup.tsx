@@ -22,27 +22,45 @@ export default function Signup() {
   const [error, setError] = useState("");
 
   const handleSignup = async () => {
-    if (!email.trim() || !username.trim() || !password.trim()) {
-      setError("Please fill in all fields.");
-      return;
+  if (!email.trim() || !username.trim() || !password.trim()) {
+    setError("Please fill in all fields.");
+    return;
+  }
+
+  try {
+    setError("");
+    setLoading(true);
+
+    console.log("Signup payload:", {
+      email: email.trim(),
+      username: username.trim(),
+      passwordLength: password.length,
+    });
+
+    const res = await authApi.signup(email.trim(), username.trim(), password);
+
+    console.log("Signup response:", res);
+
+    if (!res?.access_token || !res?.refresh_token || !res?.user?.username) {
+      throw new Error("Invalid response from server.");
     }
-    try {
-      setError("");
-      setLoading(true);
-      const res = await authApi.signup(email.trim(), username.trim(), password);
-      await saveTokens(res.access_token, res.refresh_token);
-      setAccount({
-        username: res.user.username,
-        createdAt: Date.now(),
-        metrics: {},
-      });
-      navigation.replace("Onboarding");
-    } catch {
-      setError("Please enter valid input.");
-    } finally {
-      setLoading(false);
-    }
-  };
+
+    await saveTokens(res.access_token, res.refresh_token);
+
+    setAccount({
+      username: res.user.username,
+      createdAt: Date.now(),
+      metrics: {},
+    });
+
+    navigation.replace("Onboarding");
+  } catch (err: any) {
+    console.log("Signup error:", err);
+    setError(err?.message || "Signup failed. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <ImageBackground

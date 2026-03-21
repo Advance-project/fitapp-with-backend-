@@ -8,13 +8,12 @@ import {
   ScrollView,
   Modal,
   Pressable,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList, ExerciseItem } from "../App";
-import { logWorkoutApi, workoutApi } from "../services/api";
+import { clearToken, logWorkoutApi, workoutApi } from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = {
@@ -36,8 +35,10 @@ export default function CreateRoutine() {
   const [createOpen, setCreateOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [screenMessage, setScreenMessage] = useState("");
+  const [modalMessage, setModalMessage] = useState("");
   const [pendingRemoveExerciseId, setPendingRemoveExerciseId] = useState<string | null>(null);
   const [draftReady, setDraftReady] = useState(false);
+  const [savingRoutine, setSavingRoutine] = useState(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -139,9 +140,32 @@ export default function CreateRoutine() {
     };
   }, [workoutExercises, draftReady]);
 
-  const goBackToHome = () => navigation.navigate("WorkoutHome");
+  const returnToWorkoutHome = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+  };
+
+  const goBackToHome = () => returnToWorkoutHome();
   const hasExercises = workoutExercises.length > 0;
   const totalExercises = workoutExercises.length;
+
+  const isTokenError = (error: unknown): boolean => {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message.toLowerCase();
+    return msg.includes("invalid or expired token") || msg.includes("401");
+  };
+
+  const redirectToLogin = async () => {
+    try {
+      await clearToken();
+    } catch {
+      // Ignore token clear failures and still redirect.
+    }
+    navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+  };
 
   const removeExercise = (exerciseId: string) => {
     setWorkoutExercises((prev) => prev.filter((ex) => ex.id !== exerciseId));
@@ -168,7 +192,10 @@ export default function CreateRoutine() {
     }
 
     const name = folderName.trim();
-    if (!name) return;
+    if (!name) {
+      setModalMessage("Please enter a routine name.");
+      return;
+    }
 
     const exercises = workoutExercises.map((ex) => ({
       id: ex.id,
@@ -176,23 +203,38 @@ export default function CreateRoutine() {
       muscle: ex.muscle,
     }));
 
+    setSavingRoutine(true);
     try {
       await workoutApi.saveTemplate({ name, exercises });
     } catch (error) {
-      setScreenMessage(error instanceof Error ? error.message : "Failed to save routine.");
+      const message = error instanceof Error ? error.message : "Failed to save routine.";
+      setScreenMessage(message);
+      setModalMessage(message);
+      if (isTokenError(error)) {
+        setModalMessage("Session expired. Please log in again.");
+        setScreenMessage("Session expired. Please log in again.");
+        await redirectToLogin();
+      }
       return;
+    } finally {
+      setSavingRoutine(false);
     }
 
     setCreateOpen(false);
     setFolderName("");
+    setModalMessage("");
 
     try {
       await logWorkoutApi.clearDraft();
-    } catch {
+    } catch (error) {
+      if (isTokenError(error)) {
+        await redirectToLogin();
+        return;
+      }
       // Ignore clear failures; user already navigated away.
     }
 
-    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+    returnToWorkoutHome();
   };
 
   const openAddExercise = async () => {
@@ -216,30 +258,18 @@ export default function CreateRoutine() {
       return;
     }
     setScreenMessage("");
+    setModalMessage("");
     setCreateOpen(true);
   };
 
   const confirmSaveRoutineTemplate = () => {
+    if (savingRoutine) return;
     const name = folderName.trim();
     if (!name) {
-      setScreenMessage("Please enter a routine name.");
+      setModalMessage("Please enter a routine name.");
       return;
     }
-
-    Alert.alert(
-      "Save routine",
-      `Save routine \"${name}\" to created routines?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Save",
-          onPress: () => {
-            saveRoutineTemplate();
-          },
-        },
-      ],
-      { cancelable: true }
-    );
+    saveRoutineTemplate();
   };
 
   const discardRoutine = async () => {
@@ -247,28 +277,18 @@ export default function CreateRoutine() {
     setScreenMessage("");
     try {
       await logWorkoutApi.clearDraft();
-    } catch {
+    } catch (error) {
+      if (isTokenError(error)) {
+        await redirectToLogin();
+        return;
+      }
       // Keep navigation behavior even if clear fails.
     }
-    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+    returnToWorkoutHome();
   };
 
   const confirmDiscardRoutine = () => {
-    Alert.alert(
-      "Discard routine",
-      "Are you sure you want to discard this routine? This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => {
-            discardRoutine();
-          },
-        },
-      ],
-      { cancelable: true }
-    );
+    discardRoutine();
   };
 
   return (
@@ -388,21 +408,33 @@ export default function CreateRoutine() {
 
               <TextInput
                 value={folderName}
-                onChangeText={setFolderName}
+                onChangeText={(text) => {
+                  setFolderName(text);
+                  if (modalMessage) setModalMessage("");
+                }}
                 placeholder="Enter folder name"
                 style={styles.modalInput}
               />
 
+              {!!modalMessage && <Text style={styles.modalErrorText}>{modalMessage}</Text>}
+
               <View style={styles.modalBtnsRow}>
                 <TouchableOpacity
                   style={[styles.modalBtn, styles.modalBtnGhost]}
-                  onPress={() => setCreateOpen(false)}
+                  onPress={() => {
+                    if (savingRoutine) return;
+                    setCreateOpen(false);
+                  }}
                 >
                   <Text style={styles.modalBtnGhostText}>Cancel</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.modalBtn} onPress={confirmSaveRoutineTemplate}>
-                  <Text style={styles.modalBtnText}>Save</Text>
+                <TouchableOpacity
+                  style={[styles.modalBtn, savingRoutine && styles.modalBtnDisabled]}
+                  onPress={confirmSaveRoutineTemplate}
+                  disabled={savingRoutine}
+                >
+                  <Text style={styles.modalBtnText}>{savingRoutine ? "Saving..." : "Save"}</Text>
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -604,8 +636,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalBtnText: { color: "#fff", fontWeight: "900" },
+  modalBtnDisabled: { opacity: 0.6 },
   modalBtnGhost: { backgroundColor: "#f3f4f6" },
   modalBtnGhostText: { color: "#0b1220", fontWeight: "900" },
+  modalErrorText: {
+    marginTop: 10,
+    color: "#dc2626",
+    fontWeight: "700",
+    textAlign: "center",
+  },
 
   compactConfirmCard: {
     alignSelf: "center",

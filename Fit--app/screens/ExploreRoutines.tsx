@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,41 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../App";
-import { globalTemplatesApi, GlobalTemplate } from "../services/api";
+import { globalTemplatesApi, GlobalTemplate, workoutApi, WorkoutTemplate } from "../services/api";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "ExploreRoutines">;
+
+type ExploreTemplate = {
+  id: string;
+  name: string;
+  target_muscle: string;
+  exercises: Array<{ id: string; name: string; muscle: string }>;
+  source: "global" | "created";
+};
+
+function mapCreatedTemplate(template: WorkoutTemplate): ExploreTemplate {
+  const firstMuscle = template.exercises[0]?.muscle ?? "Custom";
+  return {
+    id: `created-${template.id}`,
+    name: template.name,
+    target_muscle: firstMuscle,
+    exercises: template.exercises,
+    source: "created",
+  };
+}
+
+function mapGlobalTemplate(template: GlobalTemplate): ExploreTemplate {
+  return {
+    id: `global-${template.id}`,
+    name: template.name,
+    target_muscle: template.target_muscle,
+    exercises: template.exercises,
+    source: "global",
+  };
+}
 
 function shortTargetMuscle(label: string): string {
   const map: Record<string, string> = {
@@ -32,16 +61,63 @@ function shortTargetMuscle(label: string): string {
 
 export default function ExploreRoutines() {
   const navigation = useNavigation<Nav>();
-  const [templates, setTemplates] = useState<GlobalTemplate[]>([]);
+  const [templates, setTemplates] = useState<ExploreTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    globalTemplatesApi
-      .getAll()
-      .then(setTemplates)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      setLoading(true);
+
+      (async () => {
+        try {
+          const [globalResult, createdResult] = await Promise.allSettled([
+            globalTemplatesApi.getAll(),
+            workoutApi.getTemplates(),
+          ]);
+
+          if (!active) return;
+
+          const globalRows =
+            globalResult.status === "fulfilled" ? globalResult.value : [];
+          const createdRows =
+            createdResult.status === "fulfilled" ? createdResult.value : [];
+
+          const globalMapped = globalRows.map(mapGlobalTemplate);
+          const createdMapped = createdRows.map(mapCreatedTemplate);
+          const globalNames = new Set(globalMapped.map((row) => row.name.trim().toLowerCase()));
+
+          // Avoid duplicate cards when names match between admin/global and created templates.
+          const uniqueCreated = createdMapped.filter(
+            (row) => !globalNames.has(row.name.trim().toLowerCase())
+          );
+
+          setTemplates([...globalMapped, ...uniqueCreated]);
+
+          if (globalResult.status === "rejected" && createdResult.status === "rejected") {
+            const globalError = globalResult.reason;
+            setError(
+              globalError instanceof Error
+                ? globalError.message
+                : "Failed to load routines."
+            );
+          } else if (globalResult.status === "fulfilled" && createdResult.status === "rejected") {
+            // Global templates loaded successfully, so keep screen usable without token noise.
+            setError("");
+          } else {
+            setError("");
+          }
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -87,11 +163,15 @@ export default function ExploreRoutines() {
 
                 <View style={{ flex: 1, justifyContent: "center" }}>
                   <Text style={styles.programTitle}>{p.name}</Text>
-                  <Text style={styles.programSub}>{p.exercises.length} exercise</Text>
+                  <Text style={styles.programSub}>
+                    {p.exercises.length} exercise{p.exercises.length === 1 ? "" : "s"} • {p.source === "global" ? "Global" : "Created"}
+                  </Text>
                 </View>
               </TouchableOpacity>
             ))
           )}
+
+          {error ? <Text style={styles.emptyText}>{error}</Text> : null}
 
           <View style={{ height: 90 }} />
         </ScrollView>
