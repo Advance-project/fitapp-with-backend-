@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +11,11 @@ from app.routes import workouts as workouts_router
 from app import database
 from app.config import MONGODB_URI, DB_NAME, ADMIN_USERNAME, ADMIN_EMAIL, ADMIN_PASSWORD
 from app.auth_utils import hash_password
+
+# Conditionally import AI router if OPENAI_API_KEY is set
+ai_router = None
+if os.getenv("OPENAI_API_KEY"):
+    from app.routes import ai as ai_router
 
 
 @asynccontextmanager
@@ -46,6 +52,8 @@ app.include_router(filters_router.router)
 app.include_router(log_workout_router.router)
 app.include_router(workouts_router.router)
 
+if ai_router:
+    app.include_router(ai_router.router)
 
 @app.get("/")
 def read_root() -> dict[str, str]:

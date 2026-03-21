@@ -115,7 +115,7 @@ async def get_last_performance(
 
 
 @router.get("/global-templates", response_model=list[GlobalWorkoutTemplateResponse])
-async def get_global_templates(current_user: dict = Depends(get_current_user)):
+async def get_global_templates():
     docs = await database.get_global_templates()
     return [GlobalWorkoutTemplateResponse(**doc) for doc in docs]
 
