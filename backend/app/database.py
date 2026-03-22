@@ -54,6 +54,14 @@ def _global_workout_templates():
     return _db["global_workout_templates"]
 
 
+def _knowledge_base():
+    return _db["fitness_knowledge_base"]
+
+
+def _chat_conversations():
+    return _db["chat_conversations"]
+
+
 def _clean(doc: dict) -> dict:
     """Remove MongoDB internal _id before returning to callers."""
     doc.pop("_id", None)
@@ -208,6 +216,109 @@ async def get_admin_user_growth_stats() -> dict:
     }
 
 
+async def seed_knowledge_base() -> None:
+    """Seed fitness knowledge base to MongoDB on startup if not already present."""
+    kb_collection = _knowledge_base()
+    
+    # Check if knowledge base already exists
+    count = await kb_collection.count_documents({})
+    if count > 0:
+        return
+    
+    # Knowledge base documents
+    knowledge_base_docs = [
+        {
+            "id": "goals-fat-loss",
+            "text": (
+                "Fat-loss routines should prioritize sustainable calorie deficit, resistance training 3-5 days per week, "
+                "moderate cardio, step count, and high protein intake to preserve muscle."
+            ),
+        },
+        {
+            "id": "goals-muscle-gain",
+            "text": (
+                "Muscle-gain programs should prioritize progressive overload, 10-20 hard sets per muscle per week, "
+                "adequate recovery, and protein spread across the day."
+            ),
+        },
+        {
+            "id": "goals-strength",
+            "text": (
+                "Strength-focused programming should emphasize compound lifts, lower rep ranges on main lifts, "
+                "longer rest periods, and tracked progression over multiple weeks."
+            ),
+        },
+        {
+            "id": "progressive-overload",
+            "text": (
+                "Progressive overload can be achieved by adding reps, adding load, improving range of motion, "
+                "or increasing total weekly volume while keeping technique consistent."
+            ),
+        },
+        {
+            "id": "recovery",
+            "text": (
+                "Recovery fundamentals include 7-9 hours of sleep, at least 1-2 rest days weekly depending on split, "
+                "stress management, and avoiding excessive failure on all sets."
+            ),
+        },
+        {
+            "id": "nutrition-protein",
+            "text": (
+                "General fitness nutrition should include sufficient daily protein, hydration, enough fruits and vegetables, "
+                "and calorie intake matched to the goal of fat loss, maintenance, or muscle gain."
+            ),
+        },
+        {
+            "id": "split-ppl",
+            "text": (
+                "Push Pull Legs splits group chest, shoulders, triceps on push day; back and biceps on pull day; "
+                "and lower body on leg day. They work well for 3-6 training days per week."
+            ),
+        },
+        {
+            "id": "split-upper-lower",
+            "text": (
+                "Upper Lower splits work well for 4 days per week, balancing recovery and frequency by training upper body twice "
+                "and lower body twice weekly."
+            ),
+        },
+        {
+            "id": "beginner-programming",
+            "text": (
+                "Beginners benefit from simple routines with limited exercise variation, repeated movement patterns, "
+                "moderate volume, and clear progression targets."
+            ),
+        },
+        {
+            "id": "home-workouts",
+            "text": (
+                "Home training can use bodyweight, dumbbells, bands, and tempo control. Good home substitutions include push-ups, rows, split squats, hinges, lunges, planks, and carries."
+            ),
+        },
+        {
+            "id": "cardio",
+            "text": (
+                "Cardio can support fat loss and conditioning. It should usually complement resistance training rather than replace it, unless the goal is specifically endurance-focused."
+            ),
+        },
+        {
+            "id": "safety",
+            "text": (
+                "Coaching guidance should stay general, avoid diagnosis, and encourage users with pain, injury, or medical conditions to consult a qualified professional."
+            ),
+        },
+    ]
+    
+    await kb_collection.insert_many(knowledge_base_docs)
+
+
+async def get_all_knowledge_base() -> list[dict]:
+    """Retrieve all fitness knowledge base documents from MongoDB."""
+    docs = await _knowledge_base().find({}, {"_id": 0}).to_list(length=None)
+    return docs
+
+
 async def seed_admin(email: str, username: str, password_hash: str) -> None:
     """Create the admin user if it doesn't already exist."""
     if await get_user_by_username(username):
@@ -242,6 +353,9 @@ async def ensure_indexes() -> None:
     await _workout_history().create_index("logged_at")
     await _global_workout_templates().create_index("id", unique=True)
     await _global_workout_templates().create_index("created_at")
+    await _chat_conversations().create_index("id", unique=True)
+    await _chat_conversations().create_index("user_id")
+    await _chat_conversations().create_index("updated_at")
 
 
 async def _seed_option_collection(collection, values: list[str]) -> None:
@@ -603,3 +717,76 @@ async def get_last_exercise_performance(user_id: str, exercise_ids: list[str]) -
         if doc and doc.get("exercises"):
             result[ex_id] = doc["exercises"][0].get("sets", [])
     return result
+
+
+# ── Chat Conversations ────────────────────────────────────────────────────────
+
+async def create_chat_conversation(user_id: str, title: str = "New Chat") -> dict:
+    """Create a new chat conversation for a user."""
+    conversation = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "title": title,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "messages": [],
+    }
+    await _chat_conversations().insert_one(conversation)
+    return _clean(conversation)
+
+
+async def save_chat_message(
+    conversation_id: str,
+    role: str,
+    content: str,
+) -> dict:
+    """Add a message to a conversation."""
+    message = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    doc = await _chat_conversations().find_one_and_update(
+        {"id": conversation_id},
+        {
+            "$push": {"messages": message},
+            "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    return _clean(doc) if doc else None
+
+
+async def get_user_conversations(user_id: str) -> list[dict]:
+    """Retrieve all chat conversations for a user, sorted by most recent."""
+    docs = await _chat_conversations().find(
+        {"user_id": user_id},
+        {"_id": 0},
+    ).sort("updated_at", -1).to_list(length=None)
+    return docs
+
+
+async def get_conversation(conversation_id: str) -> Optional[dict]:
+    """Retrieve a specific conversation with all its messages."""
+    doc = await _chat_conversations().find_one(
+        {"id": conversation_id},
+        {"_id": 0},
+    )
+    return doc
+
+
+async def delete_conversation(conversation_id: str) -> bool:
+    """Delete a conversation."""
+    result = await _chat_conversations().delete_one({"id": conversation_id})
+    return result.deleted_count > 0
+
+
+async def update_conversation_title(conversation_id: str, title: str) -> Optional[dict]:
+    """Update conversation title."""
+    doc = await _chat_conversations().find_one_and_update(
+        {"id": conversation_id},
+        {"$set": {"title": title, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return _clean(doc) if doc else None

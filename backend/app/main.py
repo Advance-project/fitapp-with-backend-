@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     await database.ensure_indexes()
     await database.seed_filter_options()
     await database.seed_exercises()
+    await database.seed_knowledge_base()
     await database.seed_admin(
         email=ADMIN_EMAIL,
         username=ADMIN_USERNAME,

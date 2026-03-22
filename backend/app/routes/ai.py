@@ -1,10 +1,12 @@
 # backend/app/routes/ai.py
 import os
 import re
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 from openai import OpenAI
 from app.fitness_rag import build_fitness_refusal, is_fitness_query, retrieve_fitness_context
+from app import database
+from app.auth_utils import get_current_user
 
 # Only initialize if key is available
 client = None
@@ -16,12 +18,29 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 class RoutineRequest(BaseModel):
     prompt: str
-    history: list[dict[str, str]] = []
     max_tokens: int = 450
     temperature: float = 0.75
+    conversation_id: str | None = None
+
 
 class RoutineResponse(BaseModel):
     assistant: str
+    conversation_id: str | None = None
+
+
+class ChatConversationResponse(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    timestamp: str
 
 
 def _extract_days(prompt: str) -> int:
@@ -92,7 +111,7 @@ def _build_local_routine(prompt: str) -> str:
     return "\n".join(lines)
 
 @router.post("/routine", response_model=RoutineResponse)
-async def build_routine(payload: RoutineRequest):
+async def build_routine(payload: RoutineRequest, user: dict = Depends(get_current_user)):
     prompt = payload.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Prompt is required")
@@ -100,20 +119,38 @@ async def build_routine(payload: RoutineRequest):
     if not is_fitness_query(prompt):
         return RoutineResponse(assistant=build_fitness_refusal())
 
-    retrieved_context = retrieve_fitness_context(prompt)
+    # Create or use existing conversation
+    conv_id = payload.conversation_id
+    if not conv_id:
+        # Create new conversation with first message as title
+        title = prompt[:50] + ("..." if len(prompt) > 50 else "")
+        conv = await database.create_chat_conversation(user["id"], title)
+        conv_id = conv["id"]
+    
+    # Save user message to conversation
+    await database.save_chat_message(conv_id, "user", prompt)
+
+    retrieved_context = await retrieve_fitness_context(prompt)
     context_block = "\n".join(f"- {item}" for item in retrieved_context)
 
+    # Load full chat history from database
+    conv = await database.get_conversation(conv_id)
     chat_history: list[dict[str, str]] = []
-    for item in payload.history[-6:]:
-        role = item.get("role", "").strip().lower()
-        content = item.get("content", "").strip()
-        if role not in {"user", "assistant"} or not content:
-            continue
-        chat_history.append({"role": role, "content": content[:1200]})
+    if conv and "messages" in conv:
+        # Get all messages except the one we just added
+        all_messages = conv.get("messages", [])
+        # Skip the last message since we just added the user prompt
+        for msg in all_messages[:-1]:
+            role = msg.get("role", "").lower()
+            content = msg.get("content", "").strip()
+            if role in {"user", "assistant"} and content:
+                chat_history.append({"role": role, "content": content[:1200]})
 
     # If OpenAI isn't configured, provide a local fallback routine.
     if not client:
-        return RoutineResponse(assistant=_build_local_routine(prompt))
+        response_text = _build_local_routine(prompt)
+        await database.save_chat_message(conv_id, "assistant", response_text)
+        return RoutineResponse(assistant=response_text, conversation_id=conv_id)
 
     try:
         messages = [
@@ -138,7 +175,11 @@ async def build_routine(payload: RoutineRequest):
             temperature=payload.temperature,
         )
         text = completion.choices[0].message.content.strip()
-        return RoutineResponse(assistant=text)
+        
+        # Save assistant response to conversation
+        await database.save_chat_message(conv_id, "assistant", text)
+        
+        return RoutineResponse(assistant=text, conversation_id=conv_id)
     except Exception as exc:
         detail = str(exc)
         lower = detail.lower()
@@ -153,3 +194,122 @@ async def build_routine(payload: RoutineRequest):
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"OpenAI request failed: {detail}",
         )
+
+
+@router.get("/conversations")
+async def get_conversations(user: dict = Depends(get_current_user)):
+    """Retrieve all chat conversations for the authenticated user."""
+    conversations = await database.get_user_conversations(user["id"])
+    return [
+        ChatConversationResponse(
+            id=conv["id"],
+            user_id=conv["user_id"],
+            title=conv["title"],
+            created_at=conv["created_at"],
+            updated_at=conv["updated_at"],
+            message_count=len(conv.get("messages", [])),
+        )
+        for conv in conversations
+    ]
+
+
+@router.get("/conversations/{conversation_id}/history")
+async def get_conversation_history(conversation_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get conversation history in chatbot format for loading into UI.
+    Returns array of messages ready to display and use as history parameter.
+    """
+    conv = await database.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify ownership
+    if conv["user_id"] != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    return {
+        "id": conv["id"],
+        "title": conv["title"],
+        "created_at": conv["created_at"],
+        "updated_at": conv["updated_at"],
+        "messages": [
+            {
+                "role": msg["role"],
+                "content": msg["content"],
+                "timestamp": msg["timestamp"],
+            }
+            for msg in conv.get("messages", [])
+        ],
+    }
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation_detail(conversation_id: str, user: dict = Depends(get_current_user)):
+    """Retrieve a specific conversation with all messages."""
+    conv = await database.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify ownership
+    if conv["user_id"] != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    return {
+        "id": conv["id"],
+        "title": conv["title"],
+        "created_at": conv["created_at"],
+        "updated_at": conv["updated_at"],
+        "messages": [
+            ChatMessageResponse(
+                role=msg["role"],
+                content=msg["content"],
+                timestamp=msg["timestamp"],
+            )
+            for msg in conv.get("messages", [])
+        ],
+    }
+
+
+@router.put("/conversations/{conversation_id}/title")
+async def update_conversation_title(
+    conversation_id: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Update conversation title."""
+    conv = await database.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify ownership
+    if conv["user_id"] != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    title = payload.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Title is required")
+    
+    updated = await database.update_conversation_title(conversation_id, title)
+    return {
+        "id": updated["id"],
+        "title": updated["title"],
+        "updated_at": updated["updated_at"],
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation_endpoint(conversation_id: str, user: dict = Depends(get_current_user)):
+    """Delete a conversation."""
+    conv = await database.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    
+    # Verify ownership
+    if conv["user_id"] != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    success = await database.delete_conversation(conversation_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete conversation")
+    
+    return {"message": "Conversation deleted successfully"}
