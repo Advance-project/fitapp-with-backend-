@@ -141,11 +141,10 @@ export default function CreateRoutine() {
   }, [workoutExercises, draftReady]);
 
   const returnToWorkoutHome = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
-    navigation.navigate("WorkoutHome", { refreshAt: Date.now() });
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "WorkoutHome", params: { refreshAt: Date.now() } }],
+    });
   };
 
   const goBackToHome = () => returnToWorkoutHome();

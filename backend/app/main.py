@@ -38,10 +38,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Fit App API", lifespan=lifespan)
 
-# Allow requests from the React Native / Expo dev client
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten this to your domain in production
+    allow_origins=["*"], 
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

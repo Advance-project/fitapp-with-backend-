@@ -107,7 +107,14 @@ async def update_user(user_id: str, fields: dict) -> Optional[dict]:
 
 async def delete_user(user_id: str) -> bool:
     result = await _users().delete_one({"id": user_id})
-    return result.deleted_count > 0
+    if result.deleted_count == 0:
+        return False
+
+    await _workout_templates().delete_many({"user_id": user_id})
+    await _workout_history().delete_many({"user_id": user_id})
+    await _log_workouts().delete_many({"user_id": user_id})
+    await _chat_conversations().delete_many({"user_id": user_id})
+    return True
 
 
 async def get_all_users() -> list[dict]:
@@ -123,7 +130,8 @@ def _start_of_week_utc(now: Optional[datetime] = None) -> datetime:
 
 
 async def get_admin_user_growth_stats() -> dict:
-    this_week_start = _start_of_week_utc()
+    now = datetime.now(timezone.utc)
+    this_week_start = _start_of_week_utc(now)
     last_week_start = this_week_start - timedelta(days=7)
     next_week_start = this_week_start + timedelta(days=7)
 
@@ -158,7 +166,11 @@ async def get_admin_user_growth_stats() -> dict:
         {
             "$match": {
                 "role": "user",
-                "created_at_date": {"$gte": last_week_start, "$lt": next_week_start},
+                "created_at_date": {
+                    "$gte": last_week_start,
+                    "$lt": next_week_start,
+                    "$lte": now,
+                },
             }
         },
         {
@@ -685,9 +697,16 @@ async def delete_global_template(template_id: str) -> bool:
 
 async def get_workout_history(user_id: str) -> list[dict]:
     await prune_workout_history(user_id)
+    now = datetime.now(timezone.utc)
     cutoff = _history_cutoff_utc()
     docs = await _workout_history().find(
-        {"user_id": user_id, "logged_at": {"$gte": cutoff}},
+        {
+            "user_id": user_id,
+            "logged_at": {
+                "$gte": cutoff,
+                "$lte": now,
+            },
+        },
         {
             "_id": 0,
             "id": 1,

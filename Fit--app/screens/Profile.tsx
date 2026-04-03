@@ -89,6 +89,10 @@ function getChartSegments(sets: number[]): number {
   return 5;
 }
 
+function getChartFromNumber(sets: number[]): number {
+  return Math.max(...sets, 5);
+}
+
 export default function Profile() {
   const navigation = useNavigation<any>();
   const { width: screenWidth } = useWindowDimensions();
@@ -296,6 +300,7 @@ export default function Profile() {
                       yAxisLabel=""
                       yAxisSuffix=" sets"
                       fromZero
+                      fromNumber={getChartFromNumber(week.sets)}
                       segments={getChartSegments(week.sets)}
                       showValuesOnTopOfBars
                       chartConfig={{

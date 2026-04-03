@@ -2,7 +2,20 @@
 venv/
 __pycache__/
 *.pyc
+
+# Secrets and local environment files
 .env
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+
 resources/*.lnk
 
 Fit--app/node_modules/
